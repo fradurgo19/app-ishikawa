@@ -145,9 +145,16 @@ function isPopupAuthCallbackRequest(): boolean {
   }
 
   const callbackHash = globalThis.window.location.hash;
-  return (
+  const isCallbackHash =
     callbackHash.includes('code=') ||
     callbackHash.includes('error=') ||
-    callbackHash.includes('state=')
-  );
+    callbackHash.includes('state=');
+
+  const isPopupCallback = isPopupWindow && isCallbackHash;
+
+  // #region agent log
+  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H1',location:'App.tsx:isPopupAuthCallbackRequest',message:'Popup callback route evaluation',data:{path:globalThis.window.location.pathname,isPopupWindow,isCallbackHash,isPopupCallback},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
+  return isPopupCallback;
 }

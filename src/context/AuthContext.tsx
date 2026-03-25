@@ -58,10 +58,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await authService.initializeAuth();
       const account = await authService.getAccountWithRetry();
       if (!account) {
+        // #region agent log
+        fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H2',location:'AuthContext.tsx:syncSession:noAccount',message:'syncSession did not find account',data:{isMicrosoftAuthEnabled:authService.isMicrosoftAuthEnabled,hasAccount:false},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         dispatch({ type: 'AUTH_LOGOUT' });
         return;
       }
 
+      // #region agent log
+      fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H2',location:'AuthContext.tsx:syncSession:accountFound',message:'syncSession authenticated account',data:{hasAccount:true},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       dispatch({ type: 'AUTHENTICATED', payload: mapAccountToUser(account) });
     } catch (error) {
       console.error('Error sincronizando sesión de Microsoft:', error);
@@ -87,6 +93,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         throw new Error('Microsoft account information was not returned by Entra ID.');
       }
 
+      // #region agent log
+      fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H1',location:'AuthContext.tsx:login:authenticated',message:'AuthContext login dispatch authenticated',data:{hasLoginResultAccount:Boolean(loginResult.account),hasResolvedAccount:Boolean(account)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       dispatch({ type: 'AUTHENTICATED', payload: mapAccountToUser(account) });
     } catch (error) {
       dispatch({ type: 'AUTH_LOGOUT' });
