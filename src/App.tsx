@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect } from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -25,31 +25,6 @@ const FullScreenLoader: React.FC = () => (
   </div>
 );
 
-const PopupAuthCallbackView: React.FC = () => {
-  useEffect(() => {
-    if (globalThis.window === undefined) {
-      return undefined;
-    }
-
-    const closeTimer = globalThis.window.setTimeout(() => {
-      globalThis.window.close();
-    }, 3000);
-
-    return () => {
-      globalThis.window.clearTimeout(closeTimer);
-    };
-  }, []);
-
-  return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="text-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-2 border-red-600 border-t-transparent mx-auto"></div>
-        <p className="text-sm text-gray-600 mt-4">Completando inicio de sesión de Microsoft...</p>
-      </div>
-    </div>
-  );
-};
-
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, loading } = useAuth();
 
@@ -67,6 +42,26 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
       {children}
     </>
   );
+};
+
+const RootRoute: React.FC = () => {
+  const { isAuthenticated, loading } = useAuth();
+  const hasAuthCodeHash =
+    globalThis.window !== undefined && globalThis.window.location.hash.includes('code=');
+
+  // #region agent log
+  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run4',hypothesisId:'H8',location:'App.tsx:RootRoute',message:'Root route auth/hash evaluation',data:{loading,isAuthenticated,hasAuthCodeHash},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
+  if (loading) {
+    return <FullScreenLoader />;
+  }
+
+  if (isAuthenticated) {
+    return <Navigate to="/selector" replace />;
+  }
+
+  return <Navigate to="/login" replace />;
 };
 
 const AppRoutes: React.FC = () => {
@@ -106,17 +101,13 @@ const AppRoutes: React.FC = () => {
             </ProtectedRoute>
           }
         />
-        <Route path="/" element={<Navigate to="/selector" replace />} />
+        <Route path="/" element={<RootRoute />} />
       </Routes>
     </Suspense>
   );
 };
 
 function App() {
-  if (isPopupAuthCallbackRequest()) {
-    return <PopupAuthCallbackView />;
-  }
-
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
@@ -131,34 +122,3 @@ function App() {
 }
 
 export default App;
-
-function isPopupAuthCallbackRequest(): boolean {
-  if (globalThis.window === undefined) {
-    return false;
-  }
-
-  const isPopupWindow =
-    Boolean(globalThis.window.opener) && globalThis.window.opener !== globalThis.window;
-
-  // #region agent log
-  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H1',location:'App.tsx:isPopupAuthCallbackRequest:windowCheck',message:'Popup window detection check',data:{path:globalThis.window.location.pathname,hashPreview:globalThis.window.location.hash.slice(0,120),isPopupWindow},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
-  if (!isPopupWindow) {
-    return false;
-  }
-
-  const callbackHash = globalThis.window.location.hash;
-  const isCallbackHash =
-    callbackHash.includes('code=') ||
-    callbackHash.includes('error=') ||
-    callbackHash.includes('state=');
-
-  const isPopupCallback = isPopupWindow && isCallbackHash;
-
-  // #region agent log
-  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H1',location:'App.tsx:isPopupAuthCallbackRequest',message:'Popup callback route evaluation',data:{path:globalThis.window.location.pathname,isPopupWindow,isCallbackHash,isPopupCallback},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
-  return isPopupCallback;
-}
