@@ -1,29 +1,20 @@
 import { Brand, Model, Section, ActivityType, Activity, MachineRecord, KPIData } from '../types';
 
-// Datos simulados
+// IDs alineados con valores de choice en SharePoint (texto = id, como en buildDictionaryFromRecords).
 const mockBrands: Brand[] = [
-  { id: '1', name: 'Caterpillar' },
-  { id: '2', name: 'Komatsu' },
-  { id: '3', name: 'Hitachi' },
-  { id: '4', name: 'Liebherr' },
+  { id: 'CASE', name: 'CASE' },
+  { id: 'LIUGONG', name: 'LIUGONG' },
 ];
 
 const mockModels: Model[] = [
-  { id: '1', name: '320D', brandId: '1' },
-  { id: '2', name: '330C', brandId: '1' },
-  { id: '3', name: 'PC200', brandId: '2' },
-  { id: '4', name: 'PC300', brandId: '2' },
-  { id: '5', name: 'ZX200', brandId: '3' },
-  { id: '6', name: 'R920', brandId: '4' },
+  { id: 'CX220C', name: 'CX220C', brandId: 'CASE' },
+  { id: '856H', name: '856H', brandId: 'LIUGONG' },
 ];
 
 const mockSections: Section[] = [
-  { id: '1', name: 'Motor', brandId: '1', modelId: '1' },
-  { id: '2', name: 'Hidráulicos', brandId: '1', modelId: '1' },
-  { id: '3', name: 'Transmisión', brandId: '1', modelId: '1' },
-  { id: '4', name: 'Motor', brandId: '1', modelId: '2' },
-  { id: '5', name: 'Sistema Eléctrico', brandId: '2', modelId: '3' },
-  { id: '6', name: 'Sistema de Refrigeración', brandId: '3', modelId: '5' },
+  { id: 'Motor', name: 'Motor', brandId: 'CASE', modelId: 'CX220C' },
+  { id: 'Hidráulicos', name: 'Hidráulicos', brandId: 'CASE', modelId: 'CX220C' },
+  { id: 'Transmisión', name: 'Transmisión', brandId: 'LIUGONG', modelId: '856H' },
 ];
 
 const mockActivityTypes: ActivityType[] = [
@@ -44,9 +35,10 @@ const mockActivities: Activity[] = [
 const mockRecords: MachineRecord[] = [
   {
     id: '1',
-    brandId: '1',
-    modelId: '1',
-    sectionId: '1',
+    tipoEquipoId: 'EXCAVADORA',
+    brandId: 'CASE',
+    modelId: 'CX220C',
+    sectionId: 'Motor',
     problem: 'Sobrecalentamiento del motor',
     activityTypeId: '2',
     activityId: '3',
@@ -58,9 +50,10 @@ const mockRecords: MachineRecord[] = [
   },
   {
     id: '2',
-    brandId: '1',
-    modelId: '1',
-    sectionId: '2',
+    tipoEquipoId: 'EXCAVADORA',
+    brandId: 'CASE',
+    modelId: 'CX220C',
+    sectionId: 'Hidráulicos',
     problem: 'Pérdida de presión hidráulica',
     activityTypeId: '1',
     activityId: '1',
@@ -72,9 +65,10 @@ const mockRecords: MachineRecord[] = [
   },
   {
     id: '3',
-    brandId: '2',
-    modelId: '3',
-    sectionId: '5',
+    tipoEquipoId: 'CARGADOR',
+    brandId: 'LIUGONG',
+    modelId: '856H',
+    sectionId: 'Transmisión',
     problem: 'Falla del sistema eléctrico',
     activityTypeId: '3',
     activityId: '4',
@@ -94,14 +88,14 @@ class MockSharePointService {
 
   async getModels(brandId?: string): Promise<Model[]> {
     await this.delay(300);
-    return brandId ? mockModels.filter(m => m.brandId === brandId) : mockModels;
+    return brandId ? mockModels.filter((m) => m.brandId === brandId) : mockModels;
   }
 
   async getSections(brandId?: string, modelId?: string): Promise<Section[]> {
     await this.delay(300);
     let filtered = mockSections;
-    if (brandId) filtered = filtered.filter(s => s.brandId === brandId);
-    if (modelId) filtered = filtered.filter(s => s.modelId === modelId);
+    if (brandId) filtered = filtered.filter((s) => s.brandId === brandId);
+    if (modelId) filtered = filtered.filter((s) => s.modelId === modelId);
     return filtered;
   }
 
@@ -112,23 +106,23 @@ class MockSharePointService {
 
   async getActivities(activityTypeId?: string): Promise<Activity[]> {
     await this.delay(300);
-    return activityTypeId ? mockActivities.filter(a => a.activityTypeId === activityTypeId) : mockActivities;
+    return activityTypeId ? mockActivities.filter((a) => a.activityTypeId === activityTypeId) : mockActivities;
   }
 
   async getRecords(filters?: Partial<MachineRecord>): Promise<MachineRecord[]> {
     await this.delay(500);
     let filtered = mockRecords;
-    
+
     if (filters) {
       Object.entries(filters).forEach(([key, value]) => {
         if (value) {
-          filtered = filtered.filter(record => 
-            record[key as keyof MachineRecord] === value
+          filtered = filtered.filter(
+            (record) => record[key as keyof MachineRecord] === value
           );
         }
       });
     }
-    
+
     return filtered;
   }
 
@@ -146,7 +140,9 @@ class MockSharePointService {
 
   async getKPIs(): Promise<KPIData> {
     await this.delay(200);
+    const tipos = new Set(mockRecords.map((r) => r.tipoEquipoId).filter(Boolean));
     return {
+      totalTiposEquipo: tipos.size,
       totalMarcas: mockBrands.length,
       totalModelos: mockModels.length,
       totalSecciones: mockSections.length,
@@ -155,7 +151,7 @@ class MockSharePointService {
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
 

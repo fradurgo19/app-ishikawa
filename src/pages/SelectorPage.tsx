@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SelectorCard } from '../molecules/SelectorCard';
 import { KPICard } from '../molecules/KPICard';
@@ -6,41 +6,55 @@ import { Button } from '../atoms/Button';
 import { Select } from '../atoms/Select';
 import { Input } from '../atoms/Input';
 import { sharePointService } from '../services/sharePointService';
-import { Brand, Model, Section, KPIData } from '../types';
-import { Factory, Settings, AlertTriangle, BarChart, Plus, Eye } from 'lucide-react';
+import { Section, KPIData } from '../types';
+import {
+  getDistinctTiposEquipo,
+  getMarcasForTipoEquipo,
+  getModelosForTipoYMarca,
+  isValidEquipmentCombination,
+} from '../data/equipmentMatrix';
+import { Factory, Settings, AlertTriangle, BarChart, Plus, Eye, Truck } from 'lucide-react';
 
 export const SelectorPage: React.FC = () => {
   const [selectedCard, setSelectedCard] = useState<'brand' | 'model' | 'problem' | null>(null);
-  const [brands, setBrands] = useState<Brand[]>([]);
-  const [models, setModels] = useState<Model[]>([]);
   const [sections, setSections] = useState<Section[]>([]);
   const [kpis, setKpis] = useState<KPIData | null>(null);
-  
+
+  const [selectedTipoEquipo, setSelectedTipoEquipo] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
   const [problemSearch, setProblemSearch] = useState('');
-  
+
   const navigate = useNavigate();
+
+  const tiposOptions = useMemo(
+    () => getDistinctTiposEquipo().map((t) => ({ value: t, label: t })),
+    []
+  );
+
+  const marcasOptions = useMemo(() => {
+    if (!selectedTipoEquipo) {
+      return [];
+    }
+    return getMarcasForTipoEquipo(selectedTipoEquipo).map((m) => ({ value: m, label: m }));
+  }, [selectedTipoEquipo]);
+
+  const modelosOptions = useMemo(() => {
+    if (!selectedTipoEquipo || !selectedBrand) {
+      return [];
+    }
+    return getModelosForTipoYMarca(selectedTipoEquipo, selectedBrand).map((m) => ({
+      value: m,
+      label: m,
+    }));
+  }, [selectedTipoEquipo, selectedBrand]);
 
   const loadInitialData = useCallback(async () => {
     try {
-      const [brandsData, kpisData] = await Promise.all([
-        sharePointService.getBrands(),
-        sharePointService.getKPIs(),
-      ]);
-      setBrands(brandsData);
+      const kpisData = await sharePointService.getKPIs();
       setKpis(kpisData);
     } catch (error) {
       console.error('Error cargando datos iniciales:', error);
-    }
-  }, []);
-
-  const loadModels = useCallback(async (brandId: string) => {
-    try {
-      const modelsData = await sharePointService.getModels(brandId);
-      setModels(modelsData);
-    } catch (error) {
-      console.error('Error cargando modelos:', error);
     }
   }, []);
 
@@ -59,39 +73,44 @@ export const SelectorPage: React.FC = () => {
 
   useEffect(() => {
     if (selectedBrand) {
-      void loadModels(selectedBrand);
-      void loadSections(selectedBrand);
-    }
-  }, [selectedBrand, loadModels, loadSections]);
-
-  useEffect(() => {
-    if (selectedBrand && selectedModel) {
-      void loadSections(selectedBrand, selectedModel);
+      void loadSections(selectedBrand, selectedModel || undefined);
+    } else {
+      setSections([]);
     }
   }, [selectedBrand, selectedModel, loadSections]);
 
   const handleViewFishbone = () => {
     const params = new URLSearchParams();
+    if (selectedTipoEquipo) params.set('tipoEquipo', selectedTipoEquipo);
     if (selectedBrand) params.set('brand', selectedBrand);
     if (selectedModel) params.set('model', selectedModel);
     if (problemSearch) params.set('problem', problemSearch);
-    
+
     navigate(`/fishbone?${params.toString()}`);
   };
 
-  const canViewFishbone = Boolean(selectedBrand || selectedModel || problemSearch);
+  const matrixComboValid =
+    Boolean(selectedTipoEquipo && selectedBrand && selectedModel) &&
+    isValidEquipmentCombination(selectedTipoEquipo, selectedBrand, selectedModel);
+
+  const canViewFishbone = Boolean(problemSearch || matrixComboValid);
 
   return (
     <div className="min-h-screen w-full bg-gray-50">
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900">Selector de Datos de Maquinaria</h1>
-          <p className="text-gray-600 mt-2">Selecciona criterios para analizar con el diagrama Ishikawa</p>
+          <p className="text-gray-600 mt-2">Selecciona tipo de equipo, marca y modelo según la matriz corporativa</p>
         </div>
 
-        {/* Tarjetas KPI */}
         {kpis && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6 mb-8">
+            <KPICard
+              title="Tipos de equipo"
+              value={kpis.totalTiposEquipo}
+              icon={Truck}
+              color="primary"
+            />
             <KPICard
               title="Total Marcas"
               value={kpis.totalMarcas}
@@ -119,18 +138,17 @@ export const SelectorPage: React.FC = () => {
           </div>
         )}
 
-        {/* Tarjetas de Selección */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <SelectorCard
             title="Marca"
-            description="Selecciona la marca de maquinaria"
+            description="Según tipo de equipo seleccionado"
             icon={Factory}
             onClick={() => setSelectedCard('brand')}
             selected={selectedCard === 'brand'}
           />
           <SelectorCard
             title="Modelo"
-            description="Elige un modelo específico"
+            description="Combinación válida marca / modelo"
             icon={Settings}
             onClick={() => setSelectedCard('model')}
             selected={selectedCard === 'model'}
@@ -144,31 +162,43 @@ export const SelectorPage: React.FC = () => {
           />
         </div>
 
-        {/* Formularios de Selección */}
         <div className="bg-white rounded-lg p-6 shadow-md mb-8">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">Criterios de Filtro</h2>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+            <Select
+              label="Tipo de equipo"
+              options={tiposOptions}
+              value={selectedTipoEquipo}
+              onChange={(e) => {
+                setSelectedTipoEquipo(e.target.value);
+                setSelectedBrand('');
+                setSelectedModel('');
+              }}
+              placeholder="Selecciona tipo de equipo"
+            />
+
             <Select
               label="Marca"
-              options={brands.map(b => ({ value: b.id, label: b.name }))}
+              options={marcasOptions}
               value={selectedBrand}
               onChange={(e) => {
                 setSelectedBrand(e.target.value);
-                setSelectedModel(''); // Reiniciar modelo cuando cambia la marca
+                setSelectedModel('');
               }}
-              placeholder="Selecciona una marca"
+              placeholder="Selecciona marca"
+              disabled={!selectedTipoEquipo}
             />
-            
+
             <Select
               label="Modelo"
-              options={models.map(m => ({ value: m.id, label: m.name }))}
+              options={modelosOptions}
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
-              placeholder="Selecciona un modelo"
-              disabled={!selectedBrand}
+              placeholder="Selecciona modelo"
+              disabled={!selectedTipoEquipo || !selectedBrand}
             />
-            
+
             <Input
               label="Búsqueda de Problemas"
               type="text"
@@ -184,7 +214,7 @@ export const SelectorPage: React.FC = () => {
                 Secciones Disponibles ({sections.length})
               </h3>
               <div className="flex flex-wrap gap-2">
-                {sections.map(section => (
+                {sections.map((section) => (
                   <span
                     key={section.id}
                     className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm"
@@ -197,19 +227,11 @@ export const SelectorPage: React.FC = () => {
           )}
 
           <div className="flex gap-4 mt-6 pt-6 border-t">
-            <Button
-              onClick={handleViewFishbone}
-              disabled={!canViewFishbone}
-              icon={Eye}
-            >
+            <Button onClick={handleViewFishbone} disabled={!canViewFishbone} icon={Eye}>
               Ver Diagrama Ishikawa
             </Button>
-            
-            <Button
-              variant="outline"
-              onClick={() => navigate('/new-record')}
-              icon={Plus}
-            >
+
+            <Button variant="outline" onClick={() => navigate('/new-record')} icon={Plus}>
               Crear Nuevo Registro
             </Button>
           </div>

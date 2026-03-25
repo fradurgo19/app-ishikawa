@@ -44,6 +44,7 @@ export interface Attachment {
 
 export interface MachineRecord {
   id: string;
+  tipoEquipoId: string;
   brandId: string;
   modelId: string;
   sectionId: string;
@@ -68,6 +69,7 @@ export interface FishboneNode {
 }
 
 export interface KPIData {
+  totalTiposEquipo: number;
   totalMarcas: number;
   totalModelos: number;
   totalSecciones: number;

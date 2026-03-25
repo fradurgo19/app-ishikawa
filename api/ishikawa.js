@@ -11,6 +11,7 @@ import {
 
 const ALLOWED_RESOURCES = Object.freeze(['records', 'dictionary']);
 const ALLOWED_RECORD_FILTERS = Object.freeze([
+  'tipoEquipoId',
   'brandId',
   'modelId',
   'sectionId',

@@ -8,6 +8,7 @@ export const FishbonePage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
+  const selectedTipoEquipo = normalizeQueryParam(searchParams.get('tipoEquipo'));
   const selectedBrand = normalizeQueryParam(searchParams.get('brand'));
   const selectedModel = normalizeQueryParam(searchParams.get('model'));
   const selectedProblem = normalizeQueryParam(searchParams.get('problem'));
@@ -26,7 +27,8 @@ export const FishbonePage: React.FC = () => {
           
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Análisis Ishikawa</h1>
-            <div className="flex gap-4 text-sm text-gray-600 mt-2">
+            <div className="flex flex-wrap gap-4 text-sm text-gray-600 mt-2">
+              {selectedTipoEquipo && <span>Tipo de equipo: {selectedTipoEquipo}</span>}
               {selectedBrand && <span>Marca: {selectedBrand}</span>}
               {selectedModel && <span>Modelo: {selectedModel}</span>}
               {selectedProblem && <span>Problema: {selectedProblem}</span>}
@@ -35,6 +37,7 @@ export const FishbonePage: React.FC = () => {
         </div>
 
         <FishboneDiagram
+          selectedTipoEquipo={selectedTipoEquipo}
           selectedBrand={selectedBrand}
           selectedModel={selectedModel}
           selectedProblem={selectedProblem}
@@ -54,7 +57,7 @@ export const FishbonePage: React.FC = () => {
             <div>
               <h3 className="font-medium text-gray-900 mb-2">Estructura de Datos</h3>
               <ul className="space-y-1">
-                <li>• Marca → Modelo → Sección → Problema</li>
+                <li>• Tipo de equipo → Marca → Modelo → Sección → Problema</li>
                 <li>• Problema → Tipo de Actividad → Actividad</li>
                 <li>• Actividad → Recurso, Tiempo, Adjuntos</li>
               </ul>

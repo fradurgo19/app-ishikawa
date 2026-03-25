@@ -9,15 +9,18 @@ import {
   Section,
 } from '../types';
 import { sharePointService } from '../services/sharePointService';
+import { normalizeLabel } from '../data/equipmentMatrix';
 import { ChevronRight, ChevronDown, Clock, Paperclip, PenTool as Tool } from 'lucide-react';
 
 interface FishboneDiagramProps {
+  selectedTipoEquipo?: string;
   selectedBrand?: string;
   selectedModel?: string;
   selectedProblem?: string;
 }
 
 export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
+  selectedTipoEquipo,
   selectedBrand,
   selectedModel,
   selectedProblem,
@@ -39,7 +42,7 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
 
       const fishboneNodes = buildFishboneNodes(
         { brands, models, sections, activityTypes, activities, records },
-        { selectedBrand, selectedModel, selectedProblem }
+        { selectedTipoEquipo, selectedBrand, selectedModel, selectedProblem }
       );
 
       setFishboneData(fishboneNodes);
@@ -48,7 +51,7 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [selectedBrand, selectedModel, selectedProblem]);
+  }, [selectedTipoEquipo, selectedBrand, selectedModel, selectedProblem]);
 
   useEffect(() => {
     void loadFishboneData();
@@ -162,18 +165,37 @@ interface FishboneDataBundle {
 }
 
 interface FishboneFilters {
+  selectedTipoEquipo?: string;
   selectedBrand?: string;
   selectedModel?: string;
   selectedProblem?: string;
+}
+
+function matchesBrandFilter(filters: FishboneFilters, brand: Brand): boolean {
+  if (!filters.selectedBrand) {
+    return true;
+  }
+  return (
+    brand.id === filters.selectedBrand ||
+    normalizeLabel(brand.name) === normalizeLabel(filters.selectedBrand)
+  );
+}
+
+function matchesModelFilter(filters: FishboneFilters, model: Model): boolean {
+  if (!filters.selectedModel) {
+    return true;
+  }
+  return (
+    model.id === filters.selectedModel ||
+    normalizeLabel(model.name) === normalizeLabel(filters.selectedModel)
+  );
 }
 
 function buildFishboneNodes(
   dataBundle: FishboneDataBundle,
   filters: FishboneFilters
 ): FishboneNode[] {
-  const filteredBrands = dataBundle.brands.filter(
-    (brand) => !filters.selectedBrand || brand.id === filters.selectedBrand
-  );
+  const filteredBrands = dataBundle.brands.filter((brand) => matchesBrandFilter(filters, brand));
 
   return filteredBrands.map((brand) =>
     buildBrandNode(brand, dataBundle.models, dataBundle.sections, dataBundle, filters)
@@ -188,7 +210,7 @@ function buildBrandNode(
   filters: FishboneFilters
 ): FishboneNode {
   const brandModels = models.filter(
-    (model) => model.brandId === brand.id && (!filters.selectedModel || model.id === filters.selectedModel)
+    (model) => model.brandId === brand.id && matchesModelFilter(filters, model)
   );
 
   return {
@@ -221,7 +243,7 @@ function buildModelNode(
     label: model.name,
     expanded: false,
     children: modelSections.map((section) =>
-      buildSectionNode(brand, model, section, records, activityTypes, activities, filters.selectedProblem)
+      buildSectionNode(brand, model, section, records, activityTypes, activities, filters)
     ),
   };
 }
@@ -233,10 +255,10 @@ function buildSectionNode(
   records: MachineRecord[],
   activityTypes: ActivityType[],
   activities: Activity[],
-  selectedProblem?: string
+  filters: FishboneFilters
 ): FishboneNode {
   const sectionRecords = records.filter((record) =>
-    shouldIncludeRecord(record, brand.id, model.id, section.id, selectedProblem)
+    shouldIncludeRecord(record, brand.id, model.id, section.id, filters)
   );
 
   return {
@@ -255,17 +277,23 @@ function shouldIncludeRecord(
   brandId: string,
   modelId: string,
   sectionId: string,
-  selectedProblem?: string
+  filters: FishboneFilters
 ): boolean {
   if (record.brandId !== brandId || record.modelId !== modelId || record.sectionId !== sectionId) {
     return false;
   }
 
-  if (!selectedProblem) {
+  if (filters.selectedTipoEquipo) {
+    if (normalizeLabel(record.tipoEquipoId) !== normalizeLabel(filters.selectedTipoEquipo)) {
+      return false;
+    }
+  }
+
+  if (!filters.selectedProblem) {
     return true;
   }
 
-  return record.problem.toLowerCase().includes(selectedProblem.toLowerCase());
+  return record.problem.toLowerCase().includes(filters.selectedProblem.toLowerCase());
 }
 
 function buildProblemNode(

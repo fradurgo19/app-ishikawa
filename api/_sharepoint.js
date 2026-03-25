@@ -7,6 +7,7 @@ const REQUIRED_ENV_VARS = Object.freeze([
 ]);
 
 const DEFAULT_FIELD_MAP = Object.freeze({
+  tipoEquipo: 'TipoEquipo',
   brand: 'Marca',
   model: 'Modelo',
   section: 'Seccion',
@@ -51,6 +52,7 @@ export function getSharePointConfig() {
   }
 
   const fieldMap = {
+    tipoEquipo: process.env.SHAREPOINT_FIELD_TIPO_EQUIPO || DEFAULT_FIELD_MAP.tipoEquipo,
     brand: process.env.SHAREPOINT_FIELD_BRAND || DEFAULT_FIELD_MAP.brand,
     model: process.env.SHAREPOINT_FIELD_MODEL || DEFAULT_FIELD_MAP.model,
     section: process.env.SHAREPOINT_FIELD_SECTION || DEFAULT_FIELD_MAP.section,
@@ -139,6 +141,7 @@ function buildListItemsQueryParams(fieldMap, pageSize) {
     'AttachmentFiles/FileName',
     'AttachmentFiles/ServerRelativeUrl',
     'AttachmentFiles/Length',
+    fieldMap.tipoEquipo,
     fieldMap.brand,
     fieldMap.model,
     fieldMap.section,
@@ -183,6 +186,7 @@ export function mapListItemToMachineRecord(item, fieldMap, siteOrigin = '') {
 
   const mappedRecord = {
     id: getTextValue(item.Id ?? item.ID ?? ''),
+    tipoEquipoId: fieldMap.tipoEquipo ? getTextValue(item[fieldMap.tipoEquipo]) : '',
     brandId: getTextValue(item[fieldMap.brand]),
     modelId: getTextValue(item[fieldMap.model]),
     sectionId: getTextValue(item[fieldMap.section]),
@@ -214,6 +218,10 @@ export function buildRecordPayload(record, fieldMap) {
     [fieldMap.activityType]: normalizeRequiredText(record.activityTypeId, 'activityTypeId'),
     [fieldMap.activity]: normalizeRequiredText(record.activityId, 'activityId'),
   };
+
+  if (fieldMap.tipoEquipo) {
+    payload[fieldMap.tipoEquipo] = normalizeRequiredText(record.tipoEquipoId, 'tipoEquipoId');
+  }
 
   if (fieldMap.time) {
     payload[fieldMap.time] = normalizeTime(record.time);
@@ -249,6 +257,7 @@ export function buildRecordPayload(record, fieldMap) {
 }
 
 export function buildDictionaryFromRecords(records) {
+  const uniqueTiposEquipo = new Set();
   const uniqueBrands = new Set();
   const uniqueModels = new Map();
   const uniqueSections = new Map();
@@ -256,6 +265,10 @@ export function buildDictionaryFromRecords(records) {
   const uniqueActivities = new Map();
 
   records.forEach((record) => {
+    if (record.tipoEquipoId) {
+      uniqueTiposEquipo.add(record.tipoEquipoId);
+    }
+
     if (record.brandId) {
       uniqueBrands.add(record.brandId);
     }
@@ -326,6 +339,7 @@ export function buildDictionaryFromRecords(records) {
     activityTypes,
     activities,
     kpis: {
+      totalTiposEquipo: uniqueTiposEquipo.size,
       totalMarcas: brands.length,
       totalModelos: models.length,
       totalSecciones: sections.length,
@@ -333,6 +347,16 @@ export function buildDictionaryFromRecords(records) {
     },
   };
 }
+
+const EXACT_MATCH_RECORD_KEYS = new Set([
+  'brandId',
+  'modelId',
+  'sectionId',
+  'tipoEquipoId',
+  'activityTypeId',
+  'activityId',
+  'createdBy',
+]);
 
 export function filterRecords(records, filters) {
   const normalizedFilters = Object.entries(filters).filter(([, value]) =>
@@ -350,6 +374,10 @@ export function filterRecords(records, filters) {
 
       if (!recordValue || !filterValue) {
         return false;
+      }
+
+      if (EXACT_MATCH_RECORD_KEYS.has(key)) {
+        return recordValue.toLowerCase() === filterValue.toLowerCase();
       }
 
       return recordValue.toLowerCase().includes(filterValue.toLowerCase());

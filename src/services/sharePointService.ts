@@ -92,6 +92,7 @@ class LiveSharePointService implements SharePointDataService {
     const queryParams = new URLSearchParams({ resource: 'records' });
 
     const allowedFilterKeys: Array<keyof MachineRecord> = [
+      'tipoEquipoId',
       'brandId',
       'modelId',
       'sectionId',
@@ -198,6 +199,7 @@ async function extractHttpError(response: Response): Promise<string> {
 function normalizeRecord(record: MachineRecord): MachineRecord {
   return {
     ...record,
+    tipoEquipoId: normalizeText(record.tipoEquipoId),
     time: Number.isFinite(Number(record.time)) ? Number(record.time) : 0,
     attachment: normalizeAttachment(record.attachment),
   };
@@ -208,6 +210,7 @@ function normalizeCreateRecordInput(
 ): Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'> {
   return {
     ...record,
+    tipoEquipoId: normalizeText(record.tipoEquipoId),
     resource: normalizeText(record.resource),
     createdBy: normalizeText(record.createdBy),
     time: Number.isFinite(Number(record.time)) ? Number(record.time) : 0,
