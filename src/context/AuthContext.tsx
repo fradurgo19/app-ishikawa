@@ -56,7 +56,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     try {
       await authService.initializeAuth();
-      const account = authService.getAccount();
+      const account = await authService.getAccountWithRetry();
       if (!account) {
         dispatch({ type: 'AUTH_LOGOUT' });
         return;
@@ -82,7 +82,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     try {
       const loginResult = await authService.login();
-      const account = loginResult.account ?? authService.getAccount();
+      const account = loginResult.account ?? (await authService.getAccountWithRetry());
       if (!account) {
         throw new Error('Microsoft account information was not returned by Entra ID.');
       }

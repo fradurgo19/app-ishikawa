@@ -24,7 +24,6 @@ export const LoginPage: React.FC = () => {
 
     try {
       await login();
-      navigate('/selector');
     } catch (unknownError) {
       setError(getErrorMessage(unknownError));
     }

@@ -55,6 +55,22 @@ function getAccount(): AccountInfo | null {
   return resolveActiveAccount();
 }
 
+async function getAccountWithRetry(
+  maxAttempts = 10,
+  delayMs = 120
+): Promise<AccountInfo | null> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const account = getAccount();
+    if (account) {
+      return account;
+    }
+
+    await sleep(delayMs);
+  }
+
+  return null;
+}
+
 async function login(): Promise<AuthenticationResult> {
   if (!msalInstance) {
     throw new Error(MICROSOFT_AUTH_MISCONFIGURED_MESSAGE);
@@ -66,7 +82,7 @@ async function login(): Promise<AuthenticationResult> {
   if (loginResult.account) {
     msalInstance.setActiveAccount(loginResult.account);
   } else {
-    resolveActiveAccount();
+    await getAccountWithRetry();
   }
 
   return loginResult;
@@ -126,9 +142,16 @@ function isNoTokenRequestCacheError(error: unknown): boolean {
   return error.message.includes('no_token_request_cache_error');
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, ms);
+  });
+}
+
 export const authService = {
   initializeAuth,
   getAccount,
+  getAccountWithRetry,
   login,
   logout,
   isMicrosoftAuthEnabled,
