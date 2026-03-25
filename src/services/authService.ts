@@ -29,6 +29,10 @@ async function initializeAuth(): Promise<void> {
   initializePromise = (async () => {
     await msalInstance.initialize();
 
+    // #region agent log
+    fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run3',hypothesisId:'H7',location:'authService.ts:initializeAuth:beforeRedirectHandling',message:'Before handleRedirectPromise storage/hash snapshot',data:{hasHash:globalThis.window !== undefined ? globalThis.window.location.hash.length > 0 : false,hashHasCode:globalThis.window !== undefined ? globalThis.window.location.hash.includes('code=') : false,sessionStorageMsalKeys:countStorageKeys('sessionStorage','msal'),localStorageMsalKeys:countStorageKeys('localStorage','msal')},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     if (!isRunningInsidePopup()) {
       const redirectResult = await msalInstance.handleRedirectPromise();
       if (redirectResult?.account) {
@@ -48,6 +52,9 @@ async function initializeAuth(): Promise<void> {
   })()
     .catch((error) => {
       if (isNoTokenRequestCacheError(error)) {
+        // #region agent log
+        fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run3',hypothesisId:'H7',location:'authService.ts:initializeAuth:noTokenCacheError',message:'No token request cache error raised during redirect handling',data:{errorName:error instanceof Error ? error.name : 'unknown',errorMessage:error instanceof Error ? error.message : String(error),sessionStorageMsalKeys:countStorageKeys('sessionStorage','msal'),localStorageMsalKeys:countStorageKeys('localStorage','msal')},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         return;
       }
 
@@ -180,6 +187,29 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     globalThis.setTimeout(resolve, ms);
   });
+}
+
+function countStorageKeys(
+  storageType: 'sessionStorage' | 'localStorage',
+  prefix: string
+): number {
+  if (globalThis.window === undefined) {
+    return -1;
+  }
+
+  const storage = storageType === 'sessionStorage'
+    ? globalThis.window.sessionStorage
+    : globalThis.window.localStorage;
+
+  let total = 0;
+  for (let index = 0; index < storage.length; index += 1) {
+    const key = storage.key(index);
+    if (typeof key === 'string' && key.includes(prefix)) {
+      total += 1;
+    }
+  }
+
+  return total;
 }
 
 export const authService = {
