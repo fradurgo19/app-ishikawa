@@ -1,13 +1,15 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../atoms/Button';
-import { Settings, LogOut, Home, Plus, BarChart3, GitBranch } from 'lucide-react';
+import { Settings, LogOut, Home, Plus, BarChart3, GitBranch, ChevronDown } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuContainerRef = useRef<HTMLDivElement>(null);
 
   const handleLogout = () => {
     logout();
@@ -21,7 +23,53 @@ export const Navbar: React.FC = () => {
     { path: '/fishbone', label: 'Ishikawa', icon: GitBranch },
   ];
 
+  const visibleNavItems = navItems.filter(
+    (item) => !item.coordinatorOnly || user?.role === 'coordinador'
+  );
+
   const isActive = (path: string) => location.pathname === path;
+
+  const closeMenu = useCallback(() => {
+    setMenuOpen(false);
+  }, []);
+
+  useEffect(() => {
+    closeMenu();
+  }, [location.pathname, closeMenu]);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const node = menuContainerRef.current;
+      if (node && !node.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setMenuOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [menuOpen]);
+
+  const handleNavigate = (path: string) => {
+    navigate(path);
+    setMenuOpen(false);
+  };
+
+  const currentLabel =
+    visibleNavItems.find((item) => isActive(item.path))?.label ?? 'Menú';
 
   return (
     <nav className="w-full bg-white shadow-md border-b border-gray-200">
@@ -37,26 +85,54 @@ export const Navbar: React.FC = () => {
               </span>
             </div>
 
-            <div className="hidden min-w-0 md:flex md:min-h-0 md:flex-1 md:items-center md:overflow-x-auto md:overflow-y-visible md:pb-0 md:[scrollbar-width:thin]">
-              <div className="flex w-max min-w-0 items-center gap-2 pr-1 md:gap-3">
-                {navItems
-                  .filter(item => !item.coordinatorOnly || user?.role === 'coordinador')
-                  .map((item) => (
-                    <button
-                      key={item.path}
-                      type="button"
-                      onClick={() => navigate(item.path)}
-                      className={`flex shrink-0 items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
-                        isActive(item.path)
-                          ? 'bg-red-100 text-red-700'
-                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                      }`}
-                    >
-                      <item.icon size={16} />
-                      {item.label}
-                    </button>
-                  ))}
-              </div>
+            <div ref={menuContainerRef} className="relative min-w-0 md:max-w-xs md:flex-1">
+              <button
+                type="button"
+                id="navbar-pages-menu-button"
+                aria-haspopup="true"
+                aria-expanded={menuOpen}
+                aria-controls="navbar-pages-menu"
+                onClick={() => setMenuOpen((open) => !open)}
+                className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 text-left text-sm font-medium text-gray-800 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 md:w-auto md:min-w-[14rem]"
+              >
+                <span className="truncate">
+                  <span className="text-gray-500">Ir a:</span>{' '}
+                  <span className="font-semibold text-gray-900">{currentLabel}</span>
+                </span>
+                <ChevronDown
+                  className={`h-5 w-5 shrink-0 text-gray-500 transition-transform ${menuOpen ? 'rotate-180' : ''}`}
+                  aria-hidden
+                />
+              </button>
+
+              {menuOpen ? (
+                <div
+                  id="navbar-pages-menu"
+                  role="menu"
+                  aria-labelledby="navbar-pages-menu-button"
+                  className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[min(70vh,24rem)] overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg md:right-auto md:min-w-[14rem]"
+                >
+                  {visibleNavItems.map((item) => {
+                    const active = isActive(item.path);
+                    return (
+                      <button
+                        key={item.path}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => handleNavigate(item.path)}
+                        className={`flex w-full items-center gap-3 px-4 py-3 text-left text-sm transition ${
+                          active
+                            ? 'bg-red-50 font-semibold text-red-700'
+                            : 'text-gray-700 hover:bg-gray-50'
+                        }`}
+                      >
+                        <item.icon size={18} className="shrink-0 opacity-80" aria-hidden />
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
           </div>
 
