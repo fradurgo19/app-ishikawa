@@ -1,0 +1,72 @@
+import React from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { FishboneDiagram } from '../organisms/FishboneDiagram';
+import { Button } from '../atoms/Button';
+import { ArrowLeft } from 'lucide-react';
+
+export const FishbonePage: React.FC = () => {
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  const selectedBrand = normalizeQueryParam(searchParams.get('brand'));
+  const selectedModel = normalizeQueryParam(searchParams.get('model'));
+  const selectedProblem = normalizeQueryParam(searchParams.get('problem'));
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="flex items-center gap-4 mb-8">
+          <Button
+            variant="ghost"
+            icon={ArrowLeft}
+            onClick={() => navigate('/selector')}
+          >
+            Volver al Selector
+          </Button>
+          
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">Análisis Ishikawa</h1>
+            <div className="flex gap-4 text-sm text-gray-600 mt-2">
+              {selectedBrand && <span>Marca: {selectedBrand}</span>}
+              {selectedModel && <span>Modelo: {selectedModel}</span>}
+              {selectedProblem && <span>Problema: {selectedProblem}</span>}
+            </div>
+          </div>
+        </div>
+
+        <FishboneDiagram
+          selectedBrand={selectedBrand}
+          selectedModel={selectedModel}
+          selectedProblem={selectedProblem}
+        />
+
+        <div className="mt-8 bg-white rounded-lg p-6 shadow-md">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Cómo Usar</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm text-gray-600">
+            <div>
+              <h3 className="font-medium text-gray-900 mb-2">Navegación</h3>
+              <ul className="space-y-1">
+                <li>• Haz clic en cualquier nodo para expandir sus elementos</li>
+                <li>• Diferentes colores representan diferentes tipos de datos</li>
+                <li>• Los iconos ayudan a identificar tipos de contenido específicos</li>
+              </ul>
+            </div>
+            <div>
+              <h3 className="font-medium text-gray-900 mb-2">Estructura de Datos</h3>
+              <ul className="space-y-1">
+                <li>• Marca → Modelo → Sección → Problema</li>
+                <li>• Problema → Tipo de Actividad → Actividad</li>
+                <li>• Actividad → Recurso, Tiempo, Adjuntos</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+function normalizeQueryParam(value: string | null): string | undefined {
+  const normalizedValue = value?.trim();
+  return normalizedValue || undefined;
+}
