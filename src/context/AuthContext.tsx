@@ -98,6 +98,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // #endregion
       dispatch({ type: 'AUTHENTICATED', payload: mapAccountToUser(account) });
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H5',location:'AuthContext.tsx:login:catch',message:'AuthContext login failed',data:{errorName:error instanceof Error ? error.name : 'unknown',errorMessage:error instanceof Error ? error.message : String(error)},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       dispatch({ type: 'AUTH_LOGOUT' });
       throw error;
     }

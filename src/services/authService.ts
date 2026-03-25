@@ -41,7 +41,10 @@ async function initializeAuth(): Promise<void> {
       }
     }
 
-    resolveActiveAccount();
+    const activeAccount = resolveActiveAccount();
+    // #region agent log
+    fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H6',location:'authService.ts:initializeAuth:postResolve',message:'Post-initialize account resolution',data:{hasActiveAccount:Boolean(activeAccount),accountCacheCount:msalInstance.getAllAccounts().length,isPopupWindow:isRunningInsidePopup()},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
   })()
     .catch((error) => {
       if (isNoTokenRequestCacheError(error)) {
@@ -93,7 +96,19 @@ async function login(): Promise<AuthenticationResult> {
 
   await initializeAuth();
 
-  const loginResult = await msalInstance.loginPopup(loginRequest);
+  // #region agent log
+  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H5',location:'authService.ts:login:beforePopup',message:'Calling loginPopup',data:{redirectUri:loginRequest.redirectUri,accountCacheCount:msalInstance.getAllAccounts().length},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+
+  let loginResult: AuthenticationResult;
+  try {
+    loginResult = await msalInstance.loginPopup(loginRequest);
+  } catch (error) {
+    // #region agent log
+    fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H5',location:'authService.ts:login:popupError',message:'loginPopup rejected',data:{errorName:error instanceof Error ? error.name : 'unknown',errorMessage:error instanceof Error ? error.message : String(error)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    throw error;
+  }
   if (loginResult.account) {
     msalInstance.setActiveAccount(loginResult.account);
   } else {
