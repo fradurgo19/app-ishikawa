@@ -1,30 +1,32 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../atoms/Button';
-import { Input } from '../atoms/Input';
 import { Card } from '../atoms/Card';
-import { Settings } from 'lucide-react';
+import { LogIn, Settings } from 'lucide-react';
 
-const INVALID_CREDENTIALS_MESSAGE =
-  'Credenciales inválidas. Prueba "admin" o "tecnico" con contraseña "password123"';
+const MICROSOFT_LOGIN_ERROR_MESSAGE =
+  'No fue posible iniciar sesión con Microsoft. Intenta nuevamente.';
 
 export const LoginPage: React.FC = () => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const { login, loading } = useAuth();
+  const { login, loading, isAuthenticated, isMicrosoftAuthEnabled } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setError('');
-    
-    try {
-      await login(username.trim(), password);
+  useEffect(() => {
+    if (isAuthenticated) {
       navigate('/selector');
-    } catch {
-      setError(INVALID_CREDENTIALS_MESSAGE);
+    }
+  }, [isAuthenticated, navigate]);
+
+  const handleMicrosoftLogin = async () => {
+    setError('');
+
+    try {
+      await login();
+      navigate('/selector');
+    } catch (unknownError) {
+      setError(getErrorMessage(unknownError));
     }
   };
 
@@ -37,27 +39,23 @@ export const LoginPage: React.FC = () => {
               <Settings className="h-8 w-8 text-red-600" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Plataforma de Maquinaria Pesada</h1>
-            <p className="text-gray-600 mt-2">Inicia sesión para acceder al Sistema de Diagrama Ishikawa</p>
+            <p className="text-gray-600 mt-2">
+              Inicia sesión con tu cuenta corporativa Microsoft para acceder al Sistema de Diagrama
+              Ishikawa
+            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              label="Usuario"
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="Ingresa tu usuario"
-              required
-            />
-            
-            <Input
-              label="Contraseña"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Ingresa tu contraseña"
-              required
-            />
+          <div className="space-y-4">
+            <Button
+              type="button"
+              loading={loading}
+              fullWidth
+              icon={LogIn}
+              onClick={handleMicrosoftLogin}
+              disabled={!isMicrosoftAuthEnabled}
+            >
+              Iniciar sesión con Microsoft
+            </Button>
 
             {error && (
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -65,24 +63,25 @@ export const LoginPage: React.FC = () => {
               </div>
             )}
 
-            <Button
-              type="submit"
-              loading={loading}
-              fullWidth
-            >
-              Iniciar Sesión
-            </Button>
-          </form>
-
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <h3 className="text-sm font-medium text-gray-700 mb-2">Credenciales de Demostración:</h3>
-            <div className="text-xs text-gray-600 space-y-1">
-              <p><strong>Administrador:</strong> admin / password123</p>
-              <p><strong>Usuario Técnico:</strong> tecnico / password123</p>
-            </div>
+            {!isMicrosoftAuthEnabled && (
+              <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <p className="text-sm text-yellow-700">
+                  Falta configurar Microsoft Entra ID. Define `VITE_MSAL_CLIENT_ID` y
+                  `VITE_MSAL_TENANT_ID` para habilitar el inicio de sesión.
+                </p>
+              </div>
+            )}
           </div>
         </Card>
       </div>
     </div>
   );
 };
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return MICROSOFT_LOGIN_ERROR_MESSAGE;
+}

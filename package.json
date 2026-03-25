@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.app.json"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.6.1",
     "@hookform/resolvers": "^5.2.2",
     "@supabase/supabase-js": "^2.57.4",
     "@tanstack/react-query": "^5.95.2",
