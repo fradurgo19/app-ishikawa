@@ -5,6 +5,7 @@ const TENANT_ID = normalizeEnvValue(import.meta.env.VITE_MSAL_TENANT_ID || impor
 const REDIRECT_URI = normalizeEnvValue(
   import.meta.env.VITE_MSAL_REDIRECT_URI || import.meta.env.VITE_REDIRECT_URI
 );
+const POPUP_REDIRECT_URI = normalizeEnvValue(import.meta.env.VITE_MSAL_POPUP_REDIRECT_URI);
 const COORDINATOR_EMAILS = parseCoordinatorEmails(import.meta.env.VITE_COORDINATOR_EMAILS);
 
 export const isMicrosoftAuthEnabled = Boolean(CLIENT_ID && TENANT_ID);
@@ -22,9 +23,12 @@ export const msalConfig: Configuration | null = isMicrosoftAuthEnabled
     }
   : null;
 
+const popupRedirectUri = POPUP_REDIRECT_URI || REDIRECT_URI || getDefaultRedirectUri();
+
 export const loginRequest = {
   scopes: ['User.Read', 'Sites.Read.All', 'Sites.ReadWrite.All'],
   prompt: 'select_account',
+  redirectUri: popupRedirectUri,
 };
 
 export const coordinatorEmails = COORDINATOR_EMAILS;
@@ -50,9 +54,10 @@ function normalizeEnvValue(value: unknown): string {
 }
 
 function getDefaultRedirectUri(): string {
-  if (typeof window === 'undefined') {
+  if (globalThis.window === undefined) {
     return '/';
   }
 
-  return window.location.origin;
+  return globalThis.window.location.origin;
 }
+

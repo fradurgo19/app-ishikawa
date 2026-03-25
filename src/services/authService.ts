@@ -17,7 +17,7 @@ async function initializeAuth(): Promise<void> {
     return;
   }
 
-  if (initializePromise) {
+  if (initializePromise !== null) {
     await initializePromise;
     return;
   }
@@ -25,15 +25,21 @@ async function initializeAuth(): Promise<void> {
   initializePromise = (async () => {
     await msalInstance.initialize();
 
-    const redirectResult = await msalInstance.handleRedirectPromise();
-    if (redirectResult?.account) {
-      msalInstance.setActiveAccount(redirectResult.account);
-      return;
+    if (!isRunningInsidePopup()) {
+      const redirectResult = await msalInstance.handleRedirectPromise();
+      if (redirectResult?.account) {
+        msalInstance.setActiveAccount(redirectResult.account);
+        return;
+      }
     }
 
     resolveActiveAccount();
   })()
     .catch((error) => {
+      if (isNoTokenRequestCacheError(error)) {
+        return;
+      }
+
       initializePromise = null;
       throw error;
     });
@@ -97,11 +103,27 @@ function resolveActiveAccount(): AccountInfo | null {
 }
 
 function getDefaultRedirectUri(): string {
-  if (typeof window === 'undefined') {
+  if (globalThis.window === undefined) {
     return '/';
   }
 
-  return window.location.origin;
+  return globalThis.window.location.origin;
+}
+
+function isRunningInsidePopup(): boolean {
+  if (globalThis.window === undefined) {
+    return false;
+  }
+
+  return Boolean(globalThis.window.opener && globalThis.window.opener !== globalThis.window);
+}
+
+function isNoTokenRequestCacheError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return error.message.includes('no_token_request_cache_error');
 }
 
 export const authService = {
