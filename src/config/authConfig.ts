@@ -18,7 +18,7 @@ export const msalConfig: Configuration | null = isMicrosoftAuthEnabled
         redirectUri: REDIRECT_URI || getDefaultRedirectUri(),
       },
       cache: {
-        cacheLocation: BrowserCacheLocation.SessionStorage,
+        cacheLocation: BrowserCacheLocation.LocalStorage,
       },
     }
   : null;

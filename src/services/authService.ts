@@ -20,6 +20,9 @@ async function initializeAuth(): Promise<void> {
   // #region agent log
   fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H2',location:'authService.ts:initializeAuth:start',message:'initializeAuth invoked',data:{hasMsalInstance:Boolean(msalInstance),hasInitializePromise:initializePromise!==null,isPopupWindow:isRunningInsidePopup()},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
+  // #region agent log
+  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run5',hypothesisId:'H9',location:'authService.ts:initializeAuth:configSnapshot',message:'MSAL runtime configuration snapshot',data:{cacheLocation:msalConfig?.cache?.cacheLocation ?? 'none',appRedirectUri:msalConfig?.auth?.redirectUri ?? 'none',loginRequestRedirectUri:loginRequest.redirectUri},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
 
   if (initializePromise !== null) {
     await initializePromise;
@@ -30,7 +33,10 @@ async function initializeAuth(): Promise<void> {
     await msalInstance.initialize();
 
     // #region agent log
-    fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run3',hypothesisId:'H7',location:'authService.ts:initializeAuth:beforeRedirectHandling',message:'Before handleRedirectPromise storage/hash snapshot',data:{hasHash:globalThis.window !== undefined ? globalThis.window.location.hash.length > 0 : false,hashHasCode:globalThis.window !== undefined ? globalThis.window.location.hash.includes('code=') : false,sessionStorageMsalKeys:countStorageKeys('sessionStorage','msal'),localStorageMsalKeys:countStorageKeys('localStorage','msal')},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run3',hypothesisId:'H7',location:'authService.ts:initializeAuth:beforeRedirectHandling',message:'Before handleRedirectPromise storage/hash snapshot',data:{hasHash:globalThis.window === undefined ? false : globalThis.window.location.hash.length > 0,hashHasCode:globalThis.window === undefined ? false : globalThis.window.location.hash.includes('code='),sessionStorageMsalKeys:countStorageKeys('sessionStorage','msal'),localStorageMsalKeys:countStorageKeys('localStorage','msal')},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+    // #region agent log
+    fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run5',hypothesisId:'H10',location:'authService.ts:initializeAuth:windowContext',message:'Window context before redirect handling',data:{isPopupWindow:isRunningInsidePopup(),hasWindowOpener:hasWindowOpener(),windowName:getWindowName(),path:getWindowPath(),referrer:getReferrerHost()},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
 
     if (!isRunningInsidePopup()) {
@@ -54,6 +60,9 @@ async function initializeAuth(): Promise<void> {
       if (isNoTokenRequestCacheError(error)) {
         // #region agent log
         fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run3',hypothesisId:'H7',location:'authService.ts:initializeAuth:noTokenCacheError',message:'No token request cache error raised during redirect handling',data:{errorName:error instanceof Error ? error.name : 'unknown',errorMessage:error instanceof Error ? error.message : String(error),sessionStorageMsalKeys:countStorageKeys('sessionStorage','msal'),localStorageMsalKeys:countStorageKeys('localStorage','msal')},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        // #region agent log
+        fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run5',hypothesisId:'H11',location:'authService.ts:initializeAuth:noTokenWindowContext',message:'Window context when no token cache error is raised',data:{isPopupWindow:isRunningInsidePopup(),hasWindowOpener:hasWindowOpener(),windowName:getWindowName(),path:getWindowPath(),referrer:getReferrerHost()},timestamp:Date.now()})}).catch(()=>{});
         // #endregion
         return;
       }
@@ -210,6 +219,43 @@ function countStorageKeys(
   }
 
   return total;
+}
+
+function hasWindowOpener(): boolean {
+  if (globalThis.window === undefined) {
+    return false;
+  }
+
+  return Boolean(globalThis.window.opener);
+}
+
+function getWindowName(): string {
+  if (globalThis.window === undefined) {
+    return '';
+  }
+
+  return globalThis.window.name;
+}
+
+function getWindowPath(): string {
+  if (globalThis.window === undefined) {
+    return '';
+  }
+
+  return globalThis.window.location.pathname;
+}
+
+function getReferrerHost(): string {
+  const referrer = globalThis.window?.document?.referrer;
+  if (!referrer) {
+    return '';
+  }
+
+  try {
+    return new URL(referrer).hostname;
+  } catch {
+    return '';
+  }
 }
 
 export const authService = {
