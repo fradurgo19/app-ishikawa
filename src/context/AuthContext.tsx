@@ -87,16 +87,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     dispatch({ type: 'AUTH_LOADING' });
 
     try {
-      const loginResult = await authService.login();
-      const account = loginResult.account ?? (await authService.getAccountWithRetry());
-      if (!account) {
-        throw new Error('Microsoft account information was not returned by Entra ID.');
-      }
-
+      await authService.login();
+      // Full-page redirect: browser navigates to Microsoft; auth finishes on return via syncSession + handleRedirectPromise.
       // #region agent log
-      fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H1',location:'AuthContext.tsx:login:authenticated',message:'AuthContext login dispatch authenticated',data:{hasLoginResultAccount:Boolean(loginResult.account),hasResolvedAccount:Boolean(account)},timestamp:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'post-fix-redirect',hypothesisId:'H12',location:'AuthContext.tsx:login:redirectStarted',message:'loginRedirect scheduled; session will complete after Entra round-trip',data:{},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
-      dispatch({ type: 'AUTHENTICATED', payload: mapAccountToUser(account) });
     } catch (error) {
       // #region agent log
       fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H5',location:'AuthContext.tsx:login:catch',message:'AuthContext login failed',data:{errorName:error instanceof Error ? error.name : 'unknown',errorMessage:error instanceof Error ? error.message : String(error)},timestamp:Date.now()})}).catch(()=>{});

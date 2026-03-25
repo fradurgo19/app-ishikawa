@@ -1,8 +1,4 @@
-import {
-  PublicClientApplication,
-  type AccountInfo,
-  type AuthenticationResult,
-} from '@azure/msal-browser';
+import { PublicClientApplication, type AccountInfo } from '@azure/msal-browser';
 import { isMicrosoftAuthEnabled, loginRequest, msalConfig } from '../config/authConfig';
 
 const MICROSOFT_AUTH_MISCONFIGURED_MESSAGE =
@@ -105,7 +101,13 @@ async function getAccountWithRetry(
   return null;
 }
 
-async function login(): Promise<AuthenticationResult> {
+/**
+ * Full-page redirect login (not popup).
+ * Production logs showed popup authorize URLs but return windows with no `window.opener`, so
+ * `handleRedirectPromise` ran in the wrong interaction context and raised `no_token_request_cache_error`.
+ * Redirect keeps PKCE/state in the same tab that started login. @see debug-34f201.log L19-L21.
+ */
+async function login(): Promise<void> {
   if (!msalInstance) {
     throw new Error(MICROSOFT_AUTH_MISCONFIGURED_MESSAGE);
   }
@@ -113,29 +115,17 @@ async function login(): Promise<AuthenticationResult> {
   await initializeAuth();
 
   // #region agent log
-  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H5',location:'authService.ts:login:beforePopup',message:'Calling loginPopup',data:{redirectUri:loginRequest.redirectUri,accountCacheCount:msalInstance.getAllAccounts().length},timestamp:Date.now()})}).catch(()=>{});
+  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'post-fix-redirect',hypothesisId:'H12',location:'authService.ts:login:beforeRedirect',message:'Calling loginRedirect',data:{redirectUri:loginRequest.redirectUri,accountCacheCount:msalInstance.getAllAccounts().length},timestamp:Date.now()})}).catch(()=>{});
   // #endregion
 
-  let loginResult: AuthenticationResult;
   try {
-    loginResult = await msalInstance.loginPopup(loginRequest);
+    await msalInstance.loginRedirect(loginRequest);
   } catch (error) {
     // #region agent log
-    fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H5',location:'authService.ts:login:popupError',message:'loginPopup rejected',data:{errorName:error instanceof Error ? error.name : 'unknown',errorMessage:error instanceof Error ? error.message : String(error)},timestamp:Date.now()})}).catch(()=>{});
+    fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'post-fix-redirect',hypothesisId:'H12',location:'authService.ts:login:redirectError',message:'loginRedirect rejected',data:{errorName:error instanceof Error ? error.name : 'unknown',errorMessage:error instanceof Error ? error.message : String(error)},timestamp:Date.now()})}).catch(()=>{});
     // #endregion
     throw error;
   }
-  if (loginResult.account) {
-    msalInstance.setActiveAccount(loginResult.account);
-  } else {
-    await getAccountWithRetry();
-  }
-
-  // #region agent log
-  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H3',location:'authService.ts:login:result',message:'loginPopup completed',data:{hasLoginResultAccount:Boolean(loginResult.account),accountCacheCount:msalInstance.getAllAccounts().length,isPopupWindow:isRunningInsidePopup()},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
-
-  return loginResult;
 }
 
 async function logout(): Promise<void> {
@@ -144,9 +134,9 @@ async function logout(): Promise<void> {
   }
 
   await initializeAuth();
-  await msalInstance.logoutPopup({
-    mainWindowRedirectUri: getDefaultRedirectUri(),
-  });
+  const postLogoutRedirectUri =
+    globalThis.window === undefined ? '/login' : `${globalThis.window.location.origin}/login`;
+  await msalInstance.logoutRedirect({ postLogoutRedirectUri });
 }
 
 function resolveActiveAccount(): AccountInfo | null {
@@ -166,14 +156,6 @@ function resolveActiveAccount(): AccountInfo | null {
   }
 
   return null;
-}
-
-function getDefaultRedirectUri(): string {
-  if (globalThis.window === undefined) {
-    return '/';
-  }
-
-  return globalThis.window.location.origin;
 }
 
 function isRunningInsidePopup(): boolean {
