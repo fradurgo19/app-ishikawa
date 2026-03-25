@@ -23,7 +23,7 @@ export const msalConfig: Configuration | null = isMicrosoftAuthEnabled
     }
   : null;
 
-const popupRedirectUri = POPUP_REDIRECT_URI || REDIRECT_URI || getDefaultRedirectUri();
+const popupRedirectUri = POPUP_REDIRECT_URI || getDefaultPopupRedirectUri();
 
 export const loginRequest = {
   scopes: ['User.Read', 'Sites.Read.All', 'Sites.ReadWrite.All'],
@@ -59,5 +59,13 @@ function getDefaultRedirectUri(): string {
   }
 
   return globalThis.window.location.origin;
+}
+
+function getDefaultPopupRedirectUri(): string {
+  if (globalThis.window === undefined) {
+    return '/auth-popup.html';
+  }
+
+  return `${globalThis.window.location.origin}/auth-popup.html`;
 }
 
