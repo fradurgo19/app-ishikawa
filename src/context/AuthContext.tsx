@@ -58,16 +58,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await authService.initializeAuth();
       const account = await authService.getAccountWithRetry();
       if (!account) {
-        // #region agent log
-        fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H2',location:'AuthContext.tsx:syncSession:noAccount',message:'syncSession did not find account',data:{isMicrosoftAuthEnabled:authService.isMicrosoftAuthEnabled,hasAccount:false},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         dispatch({ type: 'AUTH_LOGOUT' });
         return;
       }
 
-      // #region agent log
-      fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-pre',hypothesisId:'H2',location:'AuthContext.tsx:syncSession:accountFound',message:'syncSession authenticated account',data:{hasAccount:true},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       dispatch({ type: 'AUTHENTICATED', payload: mapAccountToUser(account) });
     } catch (error) {
       console.error('Error sincronizando sesión de Microsoft:', error);
@@ -88,14 +82,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     try {
       await authService.login();
-      // Full-page redirect: browser navigates to Microsoft; auth finishes on return via syncSession + handleRedirectPromise.
-      // #region agent log
-      fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'post-fix-redirect',hypothesisId:'H12',location:'AuthContext.tsx:login:redirectStarted',message:'loginRedirect scheduled; session will complete after Entra round-trip',data:{},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
     } catch (error) {
-      // #region agent log
-      fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H5',location:'AuthContext.tsx:login:catch',message:'AuthContext login failed',data:{errorName:error instanceof Error ? error.name : 'unknown',errorMessage:error instanceof Error ? error.message : String(error)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       dispatch({ type: 'AUTH_LOGOUT' });
       throw error;
     }

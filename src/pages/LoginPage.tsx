@@ -25,9 +25,6 @@ export const LoginPage: React.FC = () => {
     try {
       await login();
     } catch (unknownError) {
-      // #region agent log
-      fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run2',hypothesisId:'H5',location:'LoginPage.tsx:handleMicrosoftLogin:catch',message:'Login page caught microsoft login error',data:{errorName:unknownError instanceof Error ? unknownError.name : 'unknown',errorMessage:unknownError instanceof Error ? unknownError.message : String(unknownError)},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       setError(getErrorMessage(unknownError));
     }
   };

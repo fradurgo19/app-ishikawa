@@ -46,12 +46,6 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
 const RootRoute: React.FC = () => {
   const { isAuthenticated, loading } = useAuth();
-  const hasAuthCodeHash =
-    globalThis.window !== undefined && globalThis.window.location.hash.includes('code=');
-
-  // #region agent log
-  fetch('http://127.0.0.1:7840/ingest/2e8455b7-7021-4c1d-9cef-8f2a31248cb9',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'34f201'},body:JSON.stringify({sessionId:'34f201',runId:'msal-loop-run4',hypothesisId:'H8',location:'App.tsx:RootRoute',message:'Root route auth/hash evaluation',data:{loading,isAuthenticated,hasAuthCodeHash},timestamp:Date.now()})}).catch(()=>{});
-  // #endregion
 
   if (loading) {
     return <FullScreenLoader />;
