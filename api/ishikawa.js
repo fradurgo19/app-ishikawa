@@ -140,8 +140,9 @@ async function loadMappedRecords(sharePointConfig) {
 async function safeLoadMappedRecords(sharePointConfig) {
   try {
     return await loadMappedRecords(sharePointConfig);
-  } catch {
+  } catch (error) {
     /* SharePoint list items failed; empty array avoids 502 and preserves API contract. */
+    console.error('[ishikawa] SharePoint list items failed:', error?.message || error);
     return [];
   }
 }

@@ -31,6 +31,7 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
   const loadFishboneData = useCallback(async () => {
     setLoading(true);
     try {
+      await sharePointService.refreshDictionary?.();
       const [brands, models, sections, activityTypes, activities, records] = await Promise.all([
         sharePointService.getBrands(),
         sharePointService.getModels(),
@@ -191,14 +192,86 @@ function matchesModelFilter(filters: FishboneFilters, model: Model): boolean {
   );
 }
 
+function mergeBrandsFromRecords(brands: Brand[], records: MachineRecord[]): Brand[] {
+  const map = new Map<string, Brand>();
+  for (const b of brands) {
+    map.set(b.id.toLowerCase(), b);
+  }
+  for (const r of records) {
+    const id = r.brandId?.trim();
+    if (!id) {
+      continue;
+    }
+    const key = id.toLowerCase();
+    if (!map.has(key)) {
+      map.set(key, { id, name: id });
+    }
+  }
+  return Array.from(map.values());
+}
+
+function mergeModelsFromRecords(models: Model[], records: MachineRecord[]): Model[] {
+  const map = new Map<string, Model>();
+  for (const m of models) {
+    map.set(`${m.brandId}::${m.id}`.toLowerCase(), m);
+  }
+  for (const r of records) {
+    const bid = r.brandId?.trim();
+    const mid = r.modelId?.trim();
+    if (!bid || !mid) {
+      continue;
+    }
+    const key = `${bid}::${mid}`.toLowerCase();
+    if (!map.has(key)) {
+      map.set(key, { id: mid, name: mid, brandId: bid });
+    }
+  }
+  return Array.from(map.values());
+}
+
+/**
+ * Secciones bajo marca/modelo: diccionario + valores presentes en registros (SharePoint),
+ * para no perder filas cuando el diccionario no tiene el triple exacto.
+ */
+function sectionsForBrandAndModel(
+  brand: Brand,
+  model: Model,
+  sections: Section[],
+  records: MachineRecord[]
+): Section[] {
+  const fromDict = sections.filter(
+    (s) => s.brandId === brand.id && s.modelId === model.id
+  );
+  const byId = new Map<string, Section>();
+  for (const s of fromDict) {
+    byId.set(s.id.toLowerCase(), s);
+  }
+  for (const r of records) {
+    if (r.brandId !== brand.id || r.modelId !== model.id) {
+      continue;
+    }
+    const sid = r.sectionId?.trim();
+    if (!sid) {
+      continue;
+    }
+    const key = sid.toLowerCase();
+    if (!byId.has(key)) {
+      byId.set(key, { id: sid, name: sid, brandId: brand.id, modelId: model.id });
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
 function buildFishboneNodes(
   dataBundle: FishboneDataBundle,
   filters: FishboneFilters
 ): FishboneNode[] {
-  const filteredBrands = dataBundle.brands.filter((brand) => matchesBrandFilter(filters, brand));
+  const brands = mergeBrandsFromRecords(dataBundle.brands, dataBundle.records);
+  const models = mergeModelsFromRecords(dataBundle.models, dataBundle.records);
+  const filteredBrands = brands.filter((brand) => matchesBrandFilter(filters, brand));
 
   return filteredBrands.map((brand) =>
-    buildBrandNode(brand, dataBundle.models, dataBundle.sections, dataBundle, filters)
+    buildBrandNode(brand, models, dataBundle.sections, dataBundle, filters)
   );
 }
 
@@ -233,9 +306,7 @@ function buildModelNode(
   activities: Activity[],
   filters: FishboneFilters
 ): FishboneNode {
-  const modelSections = sections.filter(
-    (section) => section.brandId === brand.id && section.modelId === model.id
-  );
+  const modelSections = sectionsForBrandAndModel(brand, model, sections, records);
 
   return {
     id: `${brand.id}-${model.id}`,

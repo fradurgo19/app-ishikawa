@@ -69,6 +69,7 @@ export const DataTablePage: React.FC = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
+      await sharePointService.refreshDictionary?.();
       const [recordsData, brandsData, modelsData, activityTypesData, activitiesData] = await Promise.all([
         sharePointService.getRecords(),
         sharePointService.getBrands(),
