@@ -23,6 +23,11 @@ const ALLOWED_RECORD_FILTERS = Object.freeze([
   'createdBy',
 ]);
 
+/** Límite de ejecución en Vercel (planes que lo permitan; evita 502 por timeout en listas grandes). */
+export const config = {
+  maxDuration: 60,
+};
+
 export default async function handler(req, res) {
   setJsonHeaders(res);
 
@@ -44,7 +49,7 @@ export default async function handler(req, res) {
 
     if (requestedResource === 'dictionary') {
       enforceMethod(req.method, ['GET']);
-      const records = await loadMappedRecords(sharePointConfig);
+      const records = await safeLoadMappedRecords(sharePointConfig);
       let dictionary = buildDictionaryFromRecords(records);
       try {
         dictionary = await enrichDictionaryWithSharePointFieldChoices(sharePointConfig, dictionary);
@@ -59,7 +64,7 @@ export default async function handler(req, res) {
     }
 
     if (requestedResource === 'records' && req.method === 'GET') {
-      const records = await loadMappedRecords(sharePointConfig);
+      const records = await safeLoadMappedRecords(sharePointConfig);
       const filters = extractRecordFilters(req.query);
       const filteredRecords = filterRecords(records, filters);
       sendJson(res, 200, { records: filteredRecords });
@@ -99,6 +104,19 @@ async function loadMappedRecords(sharePointConfig) {
   return listItems.map((item) =>
     mapListItemToMachineRecord(item, sharePointConfig.fieldMap, sharePointConfig.siteOrigin)
   );
+}
+
+/**
+ * Si la lectura OData de ítems falla (token, throttling, columnas, timeout), no tumba el API con 502:
+ * el cliente recibe estructura vacía y puede seguir usando metadatos de columnas del enriquecimiento.
+ */
+async function safeLoadMappedRecords(sharePointConfig) {
+  try {
+    return await loadMappedRecords(sharePointConfig);
+  } catch {
+    /* SharePoint list items failed; empty array avoids 502 and preserves API contract. */
+    return [];
+  }
 }
 
 function extractRecordFilters(query) {

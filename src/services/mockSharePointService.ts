@@ -99,6 +99,11 @@ class MockSharePointService {
     return filtered;
   }
 
+  async getSectionOptionsForNewRecord(): Promise<Section[]> {
+    await this.delay(300);
+    return [...mockSections].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }
+
   async getActivityTypes(): Promise<ActivityType[]> {
     await this.delay(300);
     return mockActivityTypes;

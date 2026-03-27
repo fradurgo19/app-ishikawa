@@ -54,7 +54,6 @@ export const NewRecordPage: React.FC = () => {
 
   const watchTipoEquipo = watch('tipoEquipoId');
   const watchBrand = watch('brandId');
-  const watchModel = watch('modelId');
   const watchActivityType = watch('activityTypeId');
 
   const tiposOptions = useMemo(
@@ -81,19 +80,15 @@ export const NewRecordPage: React.FC = () => {
 
   const loadInitialData = useCallback(async () => {
     try {
-      const activityTypesData = await sharePointService.getActivityTypes();
+      await sharePointService.refreshDictionary?.();
+      const [activityTypesData, sectionsData] = await Promise.all([
+        sharePointService.getActivityTypes(),
+        sharePointService.getSectionOptionsForNewRecord(),
+      ]);
       setActivityTypes(activityTypesData);
-    } catch (error) {
-      console.error('Error cargando datos iniciales:', error);
-    }
-  }, []);
-
-  const loadSections = useCallback(async (brandId: string, modelId?: string) => {
-    try {
-      const sectionsData = await sharePointService.getSections(brandId, modelId);
       setSections(sectionsData);
     } catch (error) {
-      console.error('Error cargando secciones:', error);
+      console.error('Error cargando datos iniciales:', error);
     }
   }, []);
 
@@ -117,7 +112,6 @@ export const NewRecordPage: React.FC = () => {
 
     setValue('brandId', '');
     setValue('modelId', '');
-    setValue('sectionId', '');
   }, [watchTipoEquipo, setValue]);
 
   useEffect(() => {
@@ -126,18 +120,7 @@ export const NewRecordPage: React.FC = () => {
     }
 
     setValue('modelId', '');
-    setValue('sectionId', '');
   }, [watchBrand, setValue]);
-
-  useEffect(() => {
-    if (!watchBrand) {
-      setSections([]);
-      return;
-    }
-
-    void loadSections(watchBrand, watchModel || undefined);
-    setValue('sectionId', '');
-  }, [watchBrand, watchModel, loadSections, setValue]);
 
   useEffect(() => {
     if (!watchActivityType) {
@@ -186,7 +169,9 @@ export const NewRecordPage: React.FC = () => {
 
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Crear Nuevo Registro</h1>
-            <p className="text-gray-600 mt-2">Tipo de equipo, marca y modelo según matriz Partequipos</p>
+            <p className="text-gray-600 mt-2">
+              Tipo, marca y modelo según matriz; sección y actividades con todas las opciones definidas en SharePoint
+            </p>
           </div>
         </div>
 
@@ -224,7 +209,7 @@ export const NewRecordPage: React.FC = () => {
               label="Sección *"
               options={sections.map((s) => ({ value: s.id, label: s.name }))}
               placeholder="Selecciona una sección"
-              disabled={!watchBrand}
+              disabled={sections.length === 0}
               {...register('sectionId', { required: 'La sección es requerida' })}
               error={errors.sectionId?.message}
             />
@@ -239,6 +224,7 @@ export const NewRecordPage: React.FC = () => {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <Select
+                key={`activity-types-${activityTypes.map((t) => t.id).join('|')}`}
                 label="Tipo de Actividad *"
                 options={activityTypes.map((at) => ({ value: at.id, label: at.name }))}
                 placeholder="Selecciona tipo de actividad"

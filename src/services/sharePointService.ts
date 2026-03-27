@@ -44,11 +44,14 @@ interface SharePointDataService {
   getBrands: () => Promise<Brand[]>;
   getModels: (brandId?: string) => Promise<Model[]>;
   getSections: (brandId?: string, modelId?: string) => Promise<Section[]>;
+  /** Nuevo registro: todas las opciones Choice de Sección, sin filtrar por marca/modelo. */
+  getSectionOptionsForNewRecord: () => Promise<Section[]>;
   getActivityTypes: () => Promise<ActivityType[]>;
   getActivities: (activityTypeId?: string) => Promise<Activity[]>;
   getRecords: (filters?: Partial<MachineRecord>) => Promise<MachineRecord[]>;
   createRecord: (record: CreateRecordInput) => Promise<MachineRecord>;
   getKPIs: () => Promise<KPIData>;
+  refreshDictionary?: () => Promise<void>;
 }
 
 const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true';
@@ -66,36 +69,66 @@ class LiveSharePointService implements SharePointDataService {
     if (!brandId) {
       return dictionary.models;
     }
-    return dictionary.models.filter((model) => model.brandId === brandId);
+    return dictionary.models.filter((model) => equalsIgnoreCase(model.brandId, brandId));
   }
 
   async getSections(brandId?: string, modelId?: string): Promise<Section[]> {
     const dictionary = await this.getDictionary();
+    const brand = brandId?.trim() ?? '';
+    const model = modelId?.trim() ?? '';
+
     const filtered = dictionary.sections.filter((section) => {
-      if (brandId && section.brandId !== brandId) {
+      if (brand && !equalsIgnoreCase(section.brandId, brand)) {
         return false;
       }
-      if (modelId && section.modelId !== modelId) {
+      if (model && section.modelId?.trim() && !equalsIgnoreCase(section.modelId, model)) {
         return false;
       }
       return true;
     });
 
     const raw = dictionary.fieldChoiceOptions?.section;
-    if (!brandId || !modelId || !raw?.length) {
+    if (!brand || !raw?.length) {
       return sortSections(filtered);
     }
 
     const seen = new Set(filtered.map((s) => s.id.toLowerCase()));
     const merged: Section[] = [...filtered];
+    const targetModelId = model;
     for (const label of raw) {
       const id = label.trim();
       if (id && !seen.has(id.toLowerCase())) {
-        merged.push({ id, name: id, brandId, modelId });
+        merged.push({ id, name: id, brandId: brand, modelId: targetModelId });
         seen.add(id.toLowerCase());
       }
     }
     return sortSections(merged);
+  }
+
+  async getSectionOptionsForNewRecord(): Promise<Section[]> {
+    const dictionary = await this.getDictionary();
+    const byKey = new Map<string, Section>();
+
+    for (const s of dictionary.sections) {
+      const key = s.id.trim().toLowerCase();
+      if (key && !byKey.has(key)) {
+        byKey.set(key, { ...s });
+      }
+    }
+
+    const raw = dictionary.fieldChoiceOptions?.section ?? [];
+    for (const label of raw) {
+      const id = label.trim();
+      if (!id) {
+        continue;
+      }
+      const key = id.toLowerCase();
+      if (!byKey.has(key)) {
+        byKey.set(key, { id, name: id, brandId: '', modelId: '' });
+      }
+    }
+
+    return sortSections(Array.from(byKey.values()));
   }
 
   async getActivityTypes(): Promise<ActivityType[]> {
@@ -125,8 +158,8 @@ class LiveSharePointService implements SharePointDataService {
       return sortActivities(dictionary.activities);
     }
 
-    const fromDict = dictionary.activities.filter(
-      (activity) => activity.activityTypeId === activityTypeId
+    const fromDict = dictionary.activities.filter((activity) =>
+      equalsIgnoreCase(activity.activityTypeId, activityTypeId)
     );
     if (!raw?.length) {
       return sortActivities(fromDict);
@@ -189,6 +222,11 @@ class LiveSharePointService implements SharePointDataService {
     return dictionary.kpis;
   }
 
+  async refreshDictionary(): Promise<void> {
+    this.dictionaryCache = null;
+    await this.getDictionary();
+  }
+
   private async getDictionary(): Promise<DictionaryResponse> {
     this.dictionaryCache ??= requestJson<DictionaryResponse>('/api/ishikawa?resource=dictionary');
 
@@ -208,17 +246,23 @@ const mockServiceAdapter: SharePointDataService = {
   getModels: (brandId?: string) => mockSharePointService.getModels(brandId),
   getSections: (brandId?: string, modelId?: string) =>
     mockSharePointService.getSections(brandId, modelId),
+  getSectionOptionsForNewRecord: () => mockSharePointService.getSectionOptionsForNewRecord(),
   getActivityTypes: () => mockSharePointService.getActivityTypes(),
   getActivities: (activityTypeId?: string) => mockSharePointService.getActivities(activityTypeId),
   getRecords: (filters?: Partial<MachineRecord>) => mockSharePointService.getRecords(filters),
   createRecord: (record: CreateRecordInput) =>
     mockSharePointService.createRecord(normalizeCreateRecordInput(record)),
   getKPIs: () => mockSharePointService.getKPIs(),
+  refreshDictionary: async () => {},
 };
 
 export const sharePointService: SharePointDataService = USE_MOCK_DATA
   ? mockServiceAdapter
   : liveSharePointService;
+
+function equalsIgnoreCase(a: string | undefined, b: string | undefined): boolean {
+  return (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
+}
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
