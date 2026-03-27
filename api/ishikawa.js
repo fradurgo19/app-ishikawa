@@ -3,6 +3,7 @@ import {
   buildRecordPayload,
   createHttpError,
   createListItem,
+  enrichDictionaryWithSharePointFieldChoices,
   fetchAllListItems,
   filterRecords,
   getSharePointConfig,
@@ -44,7 +45,8 @@ export default async function handler(req, res) {
     if (requestedResource === 'dictionary') {
       enforceMethod(req.method, ['GET']);
       const records = await loadMappedRecords(sharePointConfig);
-      const dictionary = buildDictionaryFromRecords(records);
+      let dictionary = buildDictionaryFromRecords(records);
+      dictionary = await enrichDictionaryWithSharePointFieldChoices(sharePointConfig, dictionary);
       sendJson(res, 200, dictionary);
       return;
     }
@@ -87,21 +89,8 @@ export default async function handler(req, res) {
 
 async function loadMappedRecords(sharePointConfig) {
   const listItems = await fetchAllListItems(sharePointConfig);
-  return listItems
-    .map((item) =>
-      mapListItemToMachineRecord(item, sharePointConfig.fieldMap, sharePointConfig.siteOrigin)
-    )
-    .filter(isRecordUsable);
-}
-
-function isRecordUsable(record) {
-  return (
-    Boolean(record.brandId) &&
-    Boolean(record.modelId) &&
-    Boolean(record.sectionId) &&
-    Boolean(record.problem) &&
-    Boolean(record.activityTypeId) &&
-    Boolean(record.activityId)
+  return listItems.map((item) =>
+    mapListItemToMachineRecord(item, sharePointConfig.fieldMap, sharePointConfig.siteOrigin)
   );
 }
 

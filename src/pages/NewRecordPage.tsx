@@ -32,7 +32,20 @@ const DEFAULT_CREATED_BY_USER_ID = '1';
 
 export const NewRecordPage: React.FC = () => {
   const navigate = useNavigate();
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>();
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
+    defaultValues: {
+      tipoEquipoId: '',
+      brandId: '',
+      modelId: '',
+      sectionId: '',
+      problem: '',
+      activityTypeId: '',
+      activityId: '',
+      resource: '',
+      attachment: '',
+      time: 0,
+    },
+  });
 
   const [sections, setSections] = useState<Section[]>([]);
   const [activityTypes, setActivityTypes] = useState<ActivityType[]>([]);

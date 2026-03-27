@@ -348,6 +348,158 @@ export function buildDictionaryFromRecords(records) {
   };
 }
 
+/**
+ * Combina el diccionario derivado de registros con las opciones definidas en columnas
+ * Choice/MultiChoice de la lista de SharePoint (valores que aún no aparecen en ningún ítem).
+ */
+export function mergeDictionaryWithColumnChoices(dictionary, columnChoices) {
+  const sectionChoices = Array.isArray(columnChoices.sectionChoices) ? columnChoices.sectionChoices : [];
+  const activityTypeChoices = Array.isArray(columnChoices.activityTypeChoices)
+    ? columnChoices.activityTypeChoices
+    : [];
+  const activityChoices = Array.isArray(columnChoices.activityChoices) ? columnChoices.activityChoices : [];
+
+  const mergeTypeMap = new Map();
+  dictionary.activityTypes.forEach((entry) => {
+    mergeTypeMap.set(choiceKey(entry.id), entry);
+  });
+  activityTypeChoices.forEach((raw) => {
+    const label = getTextValue(raw);
+    if (!label) {
+      return;
+    }
+    const key = choiceKey(label);
+    if (!mergeTypeMap.has(key)) {
+      mergeTypeMap.set(key, { id: label, name: label });
+    }
+  });
+  const activityTypes = Array.from(mergeTypeMap.values()).sort((left, right) =>
+    left.name.localeCompare(right.name, 'es')
+  );
+
+  const sectionMap = new Map();
+  dictionary.sections.forEach((section) => {
+    sectionMap.set(`${choiceKey(section.brandId)}::${choiceKey(section.modelId)}::${choiceKey(section.id)}`, section);
+  });
+  dictionary.models.forEach((model) => {
+    sectionChoices.forEach((raw) => {
+      const label = getTextValue(raw);
+      if (!label) {
+        return;
+      }
+      const mapKey = `${choiceKey(model.brandId)}::${choiceKey(model.id)}::${choiceKey(label)}`;
+      if (!sectionMap.has(mapKey)) {
+        sectionMap.set(mapKey, {
+          id: label,
+          name: label,
+          brandId: model.brandId,
+          modelId: model.id,
+        });
+      }
+    });
+  });
+  const sections = Array.from(sectionMap.values()).sort((left, right) =>
+    left.name.localeCompare(right.name, 'es')
+  );
+
+  const activityMap = new Map();
+  dictionary.activities.forEach((activity) => {
+    activityMap.set(`${choiceKey(activity.activityTypeId)}::${choiceKey(activity.id)}`, activity);
+  });
+  activityTypes.forEach((activityType) => {
+    activityChoices.forEach((raw) => {
+      const label = getTextValue(raw);
+      if (!label) {
+        return;
+      }
+      const mapKey = `${choiceKey(activityType.id)}::${choiceKey(label)}`;
+      if (!activityMap.has(mapKey)) {
+        activityMap.set(mapKey, {
+          id: label,
+          name: label,
+          activityTypeId: activityType.id,
+        });
+      }
+    });
+  });
+  const activities = Array.from(activityMap.values()).sort((left, right) =>
+    left.name.localeCompare(right.name, 'es')
+  );
+
+  return {
+    ...dictionary,
+    activityTypes,
+    sections,
+    activities,
+    kpis: {
+      ...dictionary.kpis,
+      totalSecciones: sections.length,
+    },
+  };
+}
+
+function choiceKey(value) {
+  return getTextValue(value).toLowerCase();
+}
+
+function extractChoicesFromFieldPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+
+  const direct = payload.Choices;
+  if (Array.isArray(direct)) {
+    return direct;
+  }
+  if (direct && typeof direct === 'object' && Array.isArray(direct.results)) {
+    return direct.results;
+  }
+
+  if (Array.isArray(payload.results)) {
+    return payload.results;
+  }
+
+  const legacyResults = payload.d?.Choices?.results ?? payload.Choices?.results;
+  if (Array.isArray(legacyResults)) {
+    return legacyResults;
+  }
+
+  return [];
+}
+
+export async function enrichDictionaryWithSharePointFieldChoices(config, dictionary) {
+  const fieldMap = config.fieldMap;
+
+  const fetchFieldChoices = async (internalName) => {
+    const trimmed = getTextValue(internalName);
+    if (!trimmed) {
+      return [];
+    }
+    try {
+      const accessToken = await getAccessToken(config);
+      const encodedList = escapeODataString(config.listTitle);
+      const encodedField = escapeODataString(trimmed);
+      const url = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedList}')/fields/getbyinternalnameortitle('${encodedField}')`;
+      const payload = await sharePointRequest(config, accessToken, { method: 'GET', url });
+      return extractChoicesFromFieldPayload(payload);
+    } catch {
+      return [];
+    }
+  };
+
+  const [sectionChoices, activityTypeChoices, activityChoices] = await Promise.all([
+    fetchFieldChoices(fieldMap.section),
+    fetchFieldChoices(fieldMap.activityType),
+    fetchFieldChoices(fieldMap.activity),
+  ]);
+
+  return mergeDictionaryWithColumnChoices(dictionary, {
+    sectionChoices,
+    activityTypeChoices,
+    activityChoices,
+  });
+}
+
 const EXACT_MATCH_RECORD_KEYS = new Set([
   'brandId',
   'modelId',
