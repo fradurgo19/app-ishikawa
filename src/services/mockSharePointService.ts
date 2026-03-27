@@ -104,9 +104,28 @@ class MockSharePointService {
     return [...mockSections].sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
 
+  async getNewRecordEquipmentSelectOptions(): Promise<{
+    tipos: string[];
+    marcas: string[];
+    modelos: string[];
+  }> {
+    await this.delay(300);
+    const tipos = Array.from(new Set(mockRecords.map((r) => r.tipoEquipoId).filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b, 'es')
+    );
+    const marcas = mockBrands.map((b) => b.id).sort((a, b) => a.localeCompare(b, 'es'));
+    const modelos = mockModels.map((m) => m.id).sort((a, b) => a.localeCompare(b, 'es'));
+    return { tipos, marcas, modelos };
+  }
+
   async getActivityTypes(): Promise<ActivityType[]> {
     await this.delay(300);
     return mockActivityTypes;
+  }
+
+  async getActivityOptionsForNewRecord(): Promise<Activity[]> {
+    await this.delay(300);
+    return [...mockActivities].sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }
 
   async getActivities(activityTypeId?: string): Promise<Activity[]> {

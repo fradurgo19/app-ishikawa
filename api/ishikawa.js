@@ -60,7 +60,14 @@ export default async function handler(req, res) {
           fieldChoiceOptions: mergeFieldChoiceOptionsFromRecordsAndDictionary(
             dictionary,
             records,
-            { section: [], activityType: [], activity: [] }
+            {
+              section: [],
+              activityType: [],
+              activity: [],
+              tipoEquipo: [],
+              brand: [],
+              model: [],
+            }
           ),
         };
       }

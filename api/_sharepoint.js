@@ -380,14 +380,19 @@ export function buildDictionaryFromRecords(records) {
     left.name.localeCompare(right.name, 'es')
   );
 
+  const tiposEquipo = Array.from(uniqueTiposEquipo)
+    .map((value) => ({ id: value, name: value }))
+    .sort((left, right) => left.name.localeCompare(right.name, 'es'));
+
   return {
+    tiposEquipo,
     brands,
     models,
     sections,
     activityTypes,
     activities,
     kpis: {
-      totalTiposEquipo: uniqueTiposEquipo.size,
+      totalTiposEquipo: tiposEquipo.length,
       totalMarcas: brands.length,
       totalModelos: models.length,
       totalSecciones: sections.length,
@@ -401,11 +406,70 @@ export function buildDictionaryFromRecords(records) {
  * Choice/MultiChoice de la lista de SharePoint (valores que aún no aparecen en ningún ítem).
  */
 export function mergeDictionaryWithColumnChoices(dictionary, columnChoices) {
+  const tipoEquipoChoices = Array.isArray(columnChoices.tipoEquipoChoices)
+    ? columnChoices.tipoEquipoChoices
+    : [];
+  const brandChoices = Array.isArray(columnChoices.brandChoices) ? columnChoices.brandChoices : [];
+  const modelChoices = Array.isArray(columnChoices.modelChoices) ? columnChoices.modelChoices : [];
   const sectionChoices = Array.isArray(columnChoices.sectionChoices) ? columnChoices.sectionChoices : [];
   const activityTypeChoices = Array.isArray(columnChoices.activityTypeChoices)
     ? columnChoices.activityTypeChoices
     : [];
   const activityChoices = Array.isArray(columnChoices.activityChoices) ? columnChoices.activityChoices : [];
+
+  const tiposMap = new Map();
+  (dictionary.tiposEquipo || []).forEach((entry) => {
+    tiposMap.set(choiceKey(entry.id), entry);
+  });
+  tipoEquipoChoices.forEach((raw) => {
+    const label = getTextValue(raw);
+    if (!label) {
+      return;
+    }
+    const key = choiceKey(label);
+    if (!tiposMap.has(key)) {
+      tiposMap.set(key, { id: label, name: label });
+    }
+  });
+  const tiposEquipo = Array.from(tiposMap.values()).sort((left, right) =>
+    left.name.localeCompare(right.name, 'es')
+  );
+
+  const brandMap = new Map();
+  dictionary.brands.forEach((entry) => {
+    brandMap.set(choiceKey(entry.id), entry);
+  });
+  brandChoices.forEach((raw) => {
+    const label = getTextValue(raw);
+    if (!label) {
+      return;
+    }
+    const key = choiceKey(label);
+    if (!brandMap.has(key)) {
+      brandMap.set(key, { id: label, name: label });
+    }
+  });
+  const brands = Array.from(brandMap.values()).sort((left, right) =>
+    left.name.localeCompare(right.name, 'es')
+  );
+
+  const modelMap = new Map();
+  dictionary.models.forEach((entry) => {
+    modelMap.set(choiceKey(entry.id), entry);
+  });
+  modelChoices.forEach((raw) => {
+    const label = getTextValue(raw);
+    if (!label) {
+      return;
+    }
+    const key = choiceKey(label);
+    if (!modelMap.has(key)) {
+      modelMap.set(key, { id: label, name: label, brandId: '' });
+    }
+  });
+  const models = Array.from(modelMap.values()).sort((left, right) =>
+    left.name.localeCompare(right.name, 'es')
+  );
 
   const mergeTypeMap = new Map();
   dictionary.activityTypes.forEach((entry) => {
@@ -476,11 +540,17 @@ export function mergeDictionaryWithColumnChoices(dictionary, columnChoices) {
 
   return {
     ...dictionary,
+    tiposEquipo,
+    brands,
+    models,
     activityTypes,
     sections,
     activities,
     kpis: {
       ...dictionary.kpis,
+      totalTiposEquipo: tiposEquipo.length,
+      totalMarcas: brands.length,
+      totalModelos: models.length,
       totalSecciones: sections.length,
     },
   };
@@ -694,6 +764,34 @@ export function mergeFieldChoiceOptionsFromRecordsAndDictionary(dictionary, reco
   const activitySet = new Set(
     (fieldChoiceOptions.activity || []).map((s) => getTextValue(s)).filter(Boolean)
   );
+  const tipoEquipoSet = new Set(
+    (fieldChoiceOptions.tipoEquipo || []).map((s) => getTextValue(s)).filter(Boolean)
+  );
+  const brandSet = new Set(
+    (fieldChoiceOptions.brand || []).map((s) => getTextValue(s)).filter(Boolean)
+  );
+  const modelSet = new Set(
+    (fieldChoiceOptions.model || []).map((s) => getTextValue(s)).filter(Boolean)
+  );
+
+  (dictionary.tiposEquipo || []).forEach((t) => {
+    const id = getTextValue(t.id);
+    if (id) {
+      tipoEquipoSet.add(id);
+    }
+  });
+  dictionary.brands.forEach((b) => {
+    const id = getTextValue(b.id);
+    if (id) {
+      brandSet.add(id);
+    }
+  });
+  dictionary.models.forEach((m) => {
+    const id = getTextValue(m.id);
+    if (id) {
+      modelSet.add(id);
+    }
+  });
 
   dictionary.sections.forEach((s) => {
     const id = getTextValue(s.id);
@@ -727,12 +825,27 @@ export function mergeFieldChoiceOptionsFromRecordsAndDictionary(dictionary, reco
     if (aid) {
       activitySet.add(aid);
     }
+    const te = getTextValue(record.tipoEquipoId);
+    if (te) {
+      tipoEquipoSet.add(te);
+    }
+    const bid = getTextValue(record.brandId);
+    if (bid) {
+      brandSet.add(bid);
+    }
+    const mid = getTextValue(record.modelId);
+    if (mid) {
+      modelSet.add(mid);
+    }
   });
 
   return {
     section: Array.from(sectionSet).sort((a, b) => a.localeCompare(b, 'es')),
     activityType: Array.from(activityTypeSet).sort((a, b) => a.localeCompare(b, 'es')),
     activity: Array.from(activitySet).sort((a, b) => a.localeCompare(b, 'es')),
+    tipoEquipo: Array.from(tipoEquipoSet).sort((a, b) => a.localeCompare(b, 'es')),
+    brand: Array.from(brandSet).sort((a, b) => a.localeCompare(b, 'es')),
+    model: Array.from(modelSet).sort((a, b) => a.localeCompare(b, 'es')),
   };
 }
 
@@ -741,10 +854,22 @@ export async function enrichDictionaryWithSharePointFieldChoices(config, diction
     const fieldMap = config.fieldMap;
     const rows = await fetchListFieldsRows(config);
 
+    let tipoEquipoChoices = choicesForFieldFromRows(rows, fieldMap.tipoEquipo);
+    let brandChoices = choicesForFieldFromRows(rows, fieldMap.brand);
+    let modelChoices = choicesForFieldFromRows(rows, fieldMap.model);
     let sectionChoices = choicesForFieldFromRows(rows, fieldMap.section);
     let activityTypeChoices = choicesForFieldFromRows(rows, fieldMap.activityType);
     let activityChoices = choicesForFieldFromRows(rows, fieldMap.activity);
 
+    if (tipoEquipoChoices.length === 0 && fieldMap.tipoEquipo) {
+      tipoEquipoChoices = await fetchListFieldChoicesRobust(config, fieldMap.tipoEquipo);
+    }
+    if (brandChoices.length === 0 && fieldMap.brand) {
+      brandChoices = await fetchListFieldChoicesRobust(config, fieldMap.brand);
+    }
+    if (modelChoices.length === 0 && fieldMap.model) {
+      modelChoices = await fetchListFieldChoicesRobust(config, fieldMap.model);
+    }
     if (sectionChoices.length === 0 && fieldMap.section) {
       sectionChoices = await fetchListFieldChoicesRobust(config, fieldMap.section);
     }
@@ -756,12 +881,18 @@ export async function enrichDictionaryWithSharePointFieldChoices(config, diction
     }
 
     let fieldChoiceOptions = {
+      tipoEquipo: tipoEquipoChoices.map((c) => getTextValue(c)).filter(Boolean),
+      brand: brandChoices.map((c) => getTextValue(c)).filter(Boolean),
+      model: modelChoices.map((c) => getTextValue(c)).filter(Boolean),
       section: sectionChoices.map((c) => getTextValue(c)).filter(Boolean),
       activityType: activityTypeChoices.map((c) => getTextValue(c)).filter(Boolean),
       activity: activityChoices.map((c) => getTextValue(c)).filter(Boolean),
     };
 
     const merged = mergeDictionaryWithColumnChoices(dictionary, {
+      tipoEquipoChoices,
+      brandChoices,
+      modelChoices,
       sectionChoices,
       activityTypeChoices,
       activityChoices,
@@ -774,7 +905,7 @@ export async function enrichDictionaryWithSharePointFieldChoices(config, diction
     const fieldChoiceOptions = mergeFieldChoiceOptionsFromRecordsAndDictionary(
       dictionary,
       records,
-      { section: [], activityType: [], activity: [] }
+      { section: [], activityType: [], activity: [], tipoEquipo: [], brand: [], model: [] }
     );
     return {
       ...dictionary,

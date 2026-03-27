@@ -19,9 +19,14 @@ interface FieldChoiceOptions {
   section: string[];
   activityType: string[];
   activity: string[];
+  tipoEquipo?: string[];
+  brand?: string[];
+  model?: string[];
 }
 
 interface DictionaryResponse {
+  /** Valores de tipo de equipo vistos en registros + metadatos de lista (misma forma que Brand). */
+  tiposEquipo?: Brand[];
   brands: Brand[];
   models: Model[];
   sections: Section[];
@@ -46,6 +51,14 @@ interface SharePointDataService {
   getSections: (brandId?: string, modelId?: string) => Promise<Section[]>;
   /** Nuevo registro: todas las opciones Choice de Sección, sin filtrar por marca/modelo. */
   getSectionOptionsForNewRecord: () => Promise<Section[]>;
+  /** Nuevo registro: listas de texto desde columnas Choice SharePoint + registros (sin matriz local). */
+  getNewRecordEquipmentSelectOptions: () => Promise<{
+    tipos: string[];
+    marcas: string[];
+    modelos: string[];
+  }>;
+  /** Nuevo registro: todas las opciones Choice de Actividad, sin filtrar por tipo de actividad. */
+  getActivityOptionsForNewRecord: () => Promise<Activity[]>;
   getActivityTypes: () => Promise<ActivityType[]>;
   getActivities: (activityTypeId?: string) => Promise<Activity[]>;
   getRecords: (filters?: Partial<MachineRecord>) => Promise<MachineRecord[]>;
@@ -105,6 +118,28 @@ class LiveSharePointService implements SharePointDataService {
     return sortSections(merged);
   }
 
+  async getNewRecordEquipmentSelectOptions(): Promise<{
+    tipos: string[];
+    marcas: string[];
+    modelos: string[];
+  }> {
+    const dictionary = await this.getDictionary();
+    const fc = dictionary.fieldChoiceOptions;
+    const tipos = mergeUniqueSortedStrings([
+      ...(dictionary.tiposEquipo?.map((t) => t.id) ?? []),
+      ...(fc?.tipoEquipo ?? []),
+    ]);
+    const marcas = mergeUniqueSortedStrings([
+      ...dictionary.brands.map((b) => b.id),
+      ...(fc?.brand ?? []),
+    ]);
+    const modelos = mergeUniqueSortedStrings([
+      ...dictionary.models.map((m) => m.id),
+      ...(fc?.model ?? []),
+    ]);
+    return { tipos, marcas, modelos };
+  }
+
   async getSectionOptionsForNewRecord(): Promise<Section[]> {
     const dictionary = await this.getDictionary();
     const byKey = new Map<string, Section>();
@@ -129,6 +164,32 @@ class LiveSharePointService implements SharePointDataService {
     }
 
     return sortSections(Array.from(byKey.values()));
+  }
+
+  async getActivityOptionsForNewRecord(): Promise<Activity[]> {
+    const dictionary = await this.getDictionary();
+    const byKey = new Map<string, Activity>();
+
+    for (const activity of dictionary.activities) {
+      const key = activity.id.trim().toLowerCase();
+      if (key && !byKey.has(key)) {
+        byKey.set(key, { ...activity });
+      }
+    }
+
+    const raw = dictionary.fieldChoiceOptions?.activity ?? [];
+    for (const label of raw) {
+      const id = label.trim();
+      if (!id) {
+        continue;
+      }
+      const key = id.toLowerCase();
+      if (!byKey.has(key)) {
+        byKey.set(key, { id, name: id, activityTypeId: '' });
+      }
+    }
+
+    return sortActivities(Array.from(byKey.values()));
   }
 
   async getActivityTypes(): Promise<ActivityType[]> {
@@ -247,6 +308,9 @@ const mockServiceAdapter: SharePointDataService = {
   getSections: (brandId?: string, modelId?: string) =>
     mockSharePointService.getSections(brandId, modelId),
   getSectionOptionsForNewRecord: () => mockSharePointService.getSectionOptionsForNewRecord(),
+  getNewRecordEquipmentSelectOptions: () =>
+    mockSharePointService.getNewRecordEquipmentSelectOptions(),
+  getActivityOptionsForNewRecord: () => mockSharePointService.getActivityOptionsForNewRecord(),
   getActivityTypes: () => mockSharePointService.getActivityTypes(),
   getActivities: (activityTypeId?: string) => mockSharePointService.getActivities(activityTypeId),
   getRecords: (filters?: Partial<MachineRecord>) => mockSharePointService.getRecords(filters),
@@ -294,6 +358,17 @@ async function extractHttpError(response: Response): Promise<string> {
   }
 
   return `HTTP ${response.status}: ${response.statusText}`;
+}
+
+function mergeUniqueSortedStrings(values: string[]): string[] {
+  const set = new Set<string>();
+  for (const v of values) {
+    const t = v?.trim();
+    if (t) {
+      set.add(t);
+    }
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b, 'es'));
 }
 
 function sortSections(sections: Section[]): Section[] {

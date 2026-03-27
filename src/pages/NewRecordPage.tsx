@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Button } from '../atoms/Button';
@@ -7,12 +7,6 @@ import { Select } from '../atoms/Select';
 import { Card } from '../atoms/Card';
 import { sharePointService } from '../services/sharePointService';
 import { Section, ActivityType, Activity } from '../types';
-import {
-  getDistinctTiposEquipo,
-  getMarcasForTipoEquipo,
-  getModelosForTipoYMarca,
-  isValidEquipmentCombination,
-} from '../data/equipmentMatrix';
 import { ArrowLeft, Save } from 'lucide-react';
 
 interface FormData {
@@ -32,7 +26,7 @@ const DEFAULT_CREATED_BY_USER_ID = '1';
 
 export const NewRecordPage: React.FC = () => {
   const navigate = useNavigate();
-  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     defaultValues: {
       tipoEquipoId: '',
       brandId: '',
@@ -50,54 +44,31 @@ export const NewRecordPage: React.FC = () => {
   const [sections, setSections] = useState<Section[]>([]);
   const [activityTypes, setActivityTypes] = useState<ActivityType[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [tiposOptions, setTiposOptions] = useState<{ value: string; label: string }[]>([]);
+  const [marcasOptions, setMarcasOptions] = useState<{ value: string; label: string }[]>([]);
+  const [modelosOptions, setModelosOptions] = useState<{ value: string; label: string }[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const watchTipoEquipo = watch('tipoEquipoId');
-  const watchBrand = watch('brandId');
-  const watchActivityType = watch('activityTypeId');
-
-  const tiposOptions = useMemo(
-    () => getDistinctTiposEquipo().map((t) => ({ value: t, label: t })),
-    []
-  );
-
-  const marcasOptions = useMemo(() => {
-    if (!watchTipoEquipo) {
-      return [];
-    }
-    return getMarcasForTipoEquipo(watchTipoEquipo).map((m) => ({ value: m, label: m }));
-  }, [watchTipoEquipo]);
-
-  const modelosOptions = useMemo(() => {
-    if (!watchTipoEquipo || !watchBrand) {
-      return [];
-    }
-    return getModelosForTipoYMarca(watchTipoEquipo, watchBrand).map((m) => ({
-      value: m,
-      label: m,
-    }));
-  }, [watchTipoEquipo, watchBrand]);
+  const toSelectOptions = (labels: string[]) =>
+    labels.map((t) => ({ value: t, label: t }));
 
   const loadInitialData = useCallback(async () => {
     try {
       await sharePointService.refreshDictionary?.();
-      const [activityTypesData, sectionsData] = await Promise.all([
+      const [equipment, activityTypesData, sectionsData, activitiesData] = await Promise.all([
+        sharePointService.getNewRecordEquipmentSelectOptions(),
         sharePointService.getActivityTypes(),
         sharePointService.getSectionOptionsForNewRecord(),
+        sharePointService.getActivityOptionsForNewRecord(),
       ]);
+      setTiposOptions(toSelectOptions(equipment.tipos));
+      setMarcasOptions(toSelectOptions(equipment.marcas));
+      setModelosOptions(toSelectOptions(equipment.modelos));
       setActivityTypes(activityTypesData);
       setSections(sectionsData);
-    } catch (error) {
-      console.error('Error cargando datos iniciales:', error);
-    }
-  }, []);
-
-  const loadActivities = useCallback(async (activityTypeId: string) => {
-    try {
-      const activitiesData = await sharePointService.getActivities(activityTypeId);
       setActivities(activitiesData);
     } catch (error) {
-      console.error('Error cargando actividades:', error);
+      console.error('Error cargando datos iniciales:', error);
     }
   }, []);
 
@@ -105,41 +76,8 @@ export const NewRecordPage: React.FC = () => {
     void loadInitialData();
   }, [loadInitialData]);
 
-  useEffect(() => {
-    if (!watchTipoEquipo) {
-      return;
-    }
-
-    setValue('brandId', '');
-    setValue('modelId', '');
-  }, [watchTipoEquipo, setValue]);
-
-  useEffect(() => {
-    if (!watchBrand) {
-      return;
-    }
-
-    setValue('modelId', '');
-  }, [watchBrand, setValue]);
-
-  useEffect(() => {
-    if (!watchActivityType) {
-      return;
-    }
-
-    void loadActivities(watchActivityType);
-    setValue('activityId', '');
-  }, [watchActivityType, loadActivities, setValue]);
-
   const onSubmit = useCallback(
     async (data: FormData) => {
-      if (
-        !isValidEquipmentCombination(data.tipoEquipoId, data.brandId, data.modelId)
-      ) {
-        alert('La combinación tipo de equipo / marca / modelo no es válida según la matriz corporativa.');
-        return;
-      }
-
       setLoading(true);
       try {
         await sharePointService.createRecord({
@@ -170,7 +108,8 @@ export const NewRecordPage: React.FC = () => {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Crear Nuevo Registro</h1>
             <p className="text-gray-600 mt-2">
-              Tipo, marca y modelo según matriz; sección y actividades con todas las opciones definidas en SharePoint
+              Los desplegables cargan las opciones de las columnas tipo selección de la lista; el resto son texto
+              libre. Las selecciones no se filtran entre sí.
             </p>
           </div>
         </div>
@@ -182,6 +121,7 @@ export const NewRecordPage: React.FC = () => {
                 label="Tipo de equipo *"
                 options={tiposOptions}
                 placeholder="Selecciona tipo de equipo"
+                disabled={tiposOptions.length === 0}
                 {...register('tipoEquipoId', { required: 'El tipo de equipo es requerido' })}
                 error={errors.tipoEquipoId?.message}
               />
@@ -190,7 +130,7 @@ export const NewRecordPage: React.FC = () => {
                 label="Marca *"
                 options={marcasOptions}
                 placeholder="Selecciona marca"
-                disabled={!watchTipoEquipo}
+                disabled={marcasOptions.length === 0}
                 {...register('brandId', { required: 'La marca es requerida' })}
                 error={errors.brandId?.message}
               />
@@ -199,7 +139,7 @@ export const NewRecordPage: React.FC = () => {
                 label="Modelo *"
                 options={modelosOptions}
                 placeholder="Selecciona modelo"
-                disabled={!watchTipoEquipo || !watchBrand}
+                disabled={modelosOptions.length === 0}
                 {...register('modelId', { required: 'El modelo es requerido' })}
                 error={errors.modelId?.message}
               />
@@ -236,7 +176,7 @@ export const NewRecordPage: React.FC = () => {
                 label="Actividad *"
                 options={activities.map((a) => ({ value: a.id, label: a.name }))}
                 placeholder="Selecciona actividad"
-                disabled={!watchActivityType}
+                disabled={activities.length === 0}
                 {...register('activityId', { required: 'La actividad es requerida' })}
                 error={errors.activityId?.message}
               />
