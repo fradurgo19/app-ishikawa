@@ -339,6 +339,27 @@ export function buildDictionaryFromRecords(records) {
     }
   });
 
+  const sectionIdsSeen = new Set(
+    Array.from(uniqueSections.values()).map((s) => getTextValue(s.id).toLowerCase())
+  );
+  records.forEach((record) => {
+    const sid = getTextValue(record.sectionId);
+    if (!sid) {
+      return;
+    }
+    const lower = sid.toLowerCase();
+    if (sectionIdsSeen.has(lower)) {
+      return;
+    }
+    sectionIdsSeen.add(lower);
+    uniqueSections.set(`flat:${lower}`, {
+      id: sid,
+      name: sid,
+      brandId: getTextValue(record.brandId),
+      modelId: getTextValue(record.modelId),
+    });
+  });
+
   const brands = Array.from(uniqueBrands)
     .map((value) => ({ id: value, name: value }))
     .sort((left, right) => left.name.localeCompare(right.name, 'es'));
@@ -659,7 +680,63 @@ async function fetchListFieldChoicesRobustInner(config, internalName) {
   return [];
 }
 
-export async function enrichDictionaryWithSharePointFieldChoices(config, dictionary) {
+/**
+ * Asegura fieldChoiceOptions con metadatos SharePoint + todo valor ya visto en ítems/diccionario
+ * (si la API de campos no devuelve Choices o la lista falló parcialmente).
+ */
+export function mergeFieldChoiceOptionsFromRecordsAndDictionary(dictionary, records, fieldChoiceOptions) {
+  const sectionSet = new Set(
+    (fieldChoiceOptions.section || []).map((s) => getTextValue(s)).filter(Boolean)
+  );
+  const activityTypeSet = new Set(
+    (fieldChoiceOptions.activityType || []).map((s) => getTextValue(s)).filter(Boolean)
+  );
+  const activitySet = new Set(
+    (fieldChoiceOptions.activity || []).map((s) => getTextValue(s)).filter(Boolean)
+  );
+
+  dictionary.sections.forEach((s) => {
+    const id = getTextValue(s.id);
+    if (id) {
+      sectionSet.add(id);
+    }
+  });
+  dictionary.activityTypes.forEach((t) => {
+    const id = getTextValue(t.id);
+    if (id) {
+      activityTypeSet.add(id);
+    }
+  });
+  dictionary.activities.forEach((a) => {
+    const id = getTextValue(a.id);
+    if (id) {
+      activitySet.add(id);
+    }
+  });
+
+  (records || []).forEach((record) => {
+    const sid = getTextValue(record.sectionId);
+    if (sid) {
+      sectionSet.add(sid);
+    }
+    const tid = getTextValue(record.activityTypeId);
+    if (tid) {
+      activityTypeSet.add(tid);
+    }
+    const aid = getTextValue(record.activityId);
+    if (aid) {
+      activitySet.add(aid);
+    }
+  });
+
+  return {
+    section: Array.from(sectionSet).sort((a, b) => a.localeCompare(b, 'es')),
+    activityType: Array.from(activityTypeSet).sort((a, b) => a.localeCompare(b, 'es')),
+    activity: Array.from(activitySet).sort((a, b) => a.localeCompare(b, 'es')),
+  };
+}
+
+export async function enrichDictionaryWithSharePointFieldChoices(config, dictionary, records = []) {
   try {
     const fieldMap = config.fieldMap;
     const rows = await fetchListFieldsRows(config);
@@ -678,7 +755,7 @@ export async function enrichDictionaryWithSharePointFieldChoices(config, diction
       activityChoices = await fetchListFieldChoicesRobust(config, fieldMap.activity);
     }
 
-    const fieldChoiceOptions = {
+    let fieldChoiceOptions = {
       section: sectionChoices.map((c) => getTextValue(c)).filter(Boolean),
       activityType: activityTypeChoices.map((c) => getTextValue(c)).filter(Boolean),
       activity: activityChoices.map((c) => getTextValue(c)).filter(Boolean),
@@ -690,11 +767,18 @@ export async function enrichDictionaryWithSharePointFieldChoices(config, diction
       activityChoices,
     });
 
+    fieldChoiceOptions = mergeFieldChoiceOptionsFromRecordsAndDictionary(merged, records, fieldChoiceOptions);
+
     return { ...merged, fieldChoiceOptions };
   } catch {
+    const fieldChoiceOptions = mergeFieldChoiceOptionsFromRecordsAndDictionary(
+      dictionary,
+      records,
+      { section: [], activityType: [], activity: [] }
+    );
     return {
       ...dictionary,
-      fieldChoiceOptions: { section: [], activityType: [], activity: [] },
+      fieldChoiceOptions,
     };
   }
 }

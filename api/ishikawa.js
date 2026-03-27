@@ -8,6 +8,7 @@ import {
   filterRecords,
   getSharePointConfig,
   mapListItemToMachineRecord,
+  mergeFieldChoiceOptionsFromRecordsAndDictionary,
 } from './_sharepoint.js';
 
 const ALLOWED_RESOURCES = Object.freeze(['records', 'dictionary']);
@@ -52,11 +53,15 @@ export default async function handler(req, res) {
       const records = await safeLoadMappedRecords(sharePointConfig);
       let dictionary = buildDictionaryFromRecords(records);
       try {
-        dictionary = await enrichDictionaryWithSharePointFieldChoices(sharePointConfig, dictionary);
+        dictionary = await enrichDictionaryWithSharePointFieldChoices(sharePointConfig, dictionary, records);
       } catch {
         dictionary = {
           ...dictionary,
-          fieldChoiceOptions: { section: [], activityType: [], activity: [] },
+          fieldChoiceOptions: mergeFieldChoiceOptionsFromRecordsAndDictionary(
+            dictionary,
+            records,
+            { section: [], activityType: [], activity: [] }
+          ),
         };
       }
       sendJson(res, 200, dictionary);
