@@ -467,37 +467,152 @@ function extractChoicesFromFieldPayload(payload) {
   return [];
 }
 
-export async function enrichDictionaryWithSharePointFieldChoices(config, dictionary) {
-  const fieldMap = config.fieldMap;
+function parseChoicesFromSchemaXml(schemaXml) {
+  if (!schemaXml || typeof schemaXml !== 'string') {
+    return [];
+  }
 
-  const fetchFieldChoices = async (internalName) => {
-    const trimmed = getTextValue(internalName);
-    if (!trimmed) {
+  const choices = [];
+  const choiceTag = /<CHOICE[^>]*>([^<]*)<\/CHOICE>/gi;
+  let match = choiceTag.exec(schemaXml);
+  while (match !== null) {
+    const label = getTextValue(match[1]);
+    if (label) {
+      choices.push(label);
+    }
+    match = choiceTag.exec(schemaXml);
+  }
+
+  return choices;
+}
+
+function extractAllChoicesFromFieldObject(field) {
+  if (!field || typeof field !== 'object') {
+    return [];
+  }
+
+  const fromRest = extractChoicesFromFieldPayload(field);
+  if (fromRest.length > 0) {
+    return fromRest;
+  }
+
+  return parseChoicesFromSchemaXml(field.SchemaXml);
+}
+
+/**
+ * Obtiene las opciones de un campo Choice/MultiChoice con varias rutas REST y SchemaXml como respaldo.
+ */
+export async function fetchListFieldChoicesRobust(config, internalName) {
+  const trimmed = getTextValue(internalName);
+  if (!trimmed) {
+    return [];
+  }
+
+  const encodedList = escapeODataString(config.listTitle);
+  const listBase = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedList}')`;
+
+  const tryExtract = (payload) => {
+    if (!payload || typeof payload !== 'object') {
       return [];
     }
+    const direct = extractAllChoicesFromFieldObject(payload);
+    if (direct.length > 0) {
+      return direct;
+    }
+    const batch = payload.value ?? payload.d?.results;
+    if (Array.isArray(batch)) {
+      for (const field of batch) {
+        const choices = extractAllChoicesFromFieldObject(field);
+        if (choices.length > 0) {
+          return choices;
+        }
+      }
+    }
+    return [];
+  };
+
+  let accessToken;
+  const ensureToken = async () => {
+    if (!accessToken) {
+      accessToken = await getAccessToken(config);
+    }
+    return accessToken;
+  };
+
+  const tryUrl = async (url) => {
     try {
-      const accessToken = await getAccessToken(config);
-      const encodedList = escapeODataString(config.listTitle);
-      const encodedField = escapeODataString(trimmed);
-      const url = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedList}')/fields/getbyinternalnameortitle('${encodedField}')`;
-      const payload = await sharePointRequest(config, accessToken, { method: 'GET', url });
-      return extractChoicesFromFieldPayload(payload);
+      const token = await ensureToken();
+      const payload = await sharePointRequest(config, token, { method: 'GET', url });
+      const choices = tryExtract(payload);
+      return choices.length > 0 ? choices : [];
     } catch {
       return [];
     }
   };
 
+  const encodedField = escapeODataString(trimmed);
+  const byInternalNameUrl = `${listBase}/fields/getbyinternalnameortitle('${encodedField}')`;
+  let result = await tryUrl(byInternalNameUrl);
+  if (result.length > 0) {
+    return result;
+  }
+
+  const odataFilter = `InternalName eq '${trimmed.replaceAll("'", "''")}'`;
+  const filterUrl = `${listBase}/fields?$filter=${encodeURIComponent(odataFilter)}&$select=InternalName,Title,Choices,TypeAsString,SchemaXml&$top=5`;
+  result = await tryUrl(filterUrl);
+  if (result.length > 0) {
+    return result;
+  }
+
+  const scanUrl = `${listBase}/fields?$select=InternalName,Title,Choices,TypeAsString,SchemaXml&$top=500`;
+  try {
+    const token = await ensureToken();
+    const payload = await sharePointRequest(config, token, { method: 'GET', url: scanUrl });
+    const rows = payload.value ?? payload.d?.results ?? [];
+    if (!Array.isArray(rows)) {
+      return [];
+    }
+    const wanted = trimmed.toLowerCase();
+    const match = rows.find((field) => {
+      const internal = getTextValue(field.InternalName).toLowerCase();
+      const title = getTextValue(field.Title).toLowerCase();
+      return internal === wanted || title === wanted;
+    });
+    if (match) {
+      const choices = extractAllChoicesFromFieldObject(match);
+      if (choices.length > 0) {
+        return choices;
+      }
+    }
+  } catch {
+    return [];
+  }
+
+  return [];
+}
+
+export async function enrichDictionaryWithSharePointFieldChoices(config, dictionary) {
+  const fieldMap = config.fieldMap;
+
   const [sectionChoices, activityTypeChoices, activityChoices] = await Promise.all([
-    fetchFieldChoices(fieldMap.section),
-    fetchFieldChoices(fieldMap.activityType),
-    fetchFieldChoices(fieldMap.activity),
+    fetchListFieldChoicesRobust(config, fieldMap.section),
+    fetchListFieldChoicesRobust(config, fieldMap.activityType),
+    fetchListFieldChoicesRobust(config, fieldMap.activity),
   ]);
 
-  return mergeDictionaryWithColumnChoices(dictionary, {
+  const fieldChoiceOptions = {
+    section: sectionChoices.map((c) => getTextValue(c)).filter(Boolean),
+    activityType: activityTypeChoices.map((c) => getTextValue(c)).filter(Boolean),
+    activity: activityChoices.map((c) => getTextValue(c)).filter(Boolean),
+  };
+
+  const merged = mergeDictionaryWithColumnChoices(dictionary, {
     sectionChoices,
     activityTypeChoices,
     activityChoices,
   });
+
+  return { ...merged, fieldChoiceOptions };
 }
 
 const EXACT_MATCH_RECORD_KEYS = new Set([

@@ -14,6 +14,13 @@ type CreateRecordInput = Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt' | 
   attachment?: Attachment | string;
 };
 
+/** Opciones tal como en columnas Choice de SharePoint (texto del valor guardado). */
+interface FieldChoiceOptions {
+  section: string[];
+  activityType: string[];
+  activity: string[];
+}
+
 interface DictionaryResponse {
   brands: Brand[];
   models: Model[];
@@ -21,6 +28,8 @@ interface DictionaryResponse {
   activityTypes: ActivityType[];
   activities: Activity[];
   kpis: KPIData;
+  /** Presente en API real: fusionar en cliente si el diccionario por registros queda incompleto. */
+  fieldChoiceOptions?: FieldChoiceOptions;
 }
 
 interface RecordsResponse {
@@ -62,7 +71,7 @@ class LiveSharePointService implements SharePointDataService {
 
   async getSections(brandId?: string, modelId?: string): Promise<Section[]> {
     const dictionary = await this.getDictionary();
-    return dictionary.sections.filter((section) => {
+    const filtered = dictionary.sections.filter((section) => {
       if (brandId && section.brandId !== brandId) {
         return false;
       }
@@ -71,21 +80,68 @@ class LiveSharePointService implements SharePointDataService {
       }
       return true;
     });
+
+    const raw = dictionary.fieldChoiceOptions?.section;
+    if (!brandId || !modelId || !raw?.length) {
+      return sortSections(filtered);
+    }
+
+    const seen = new Set(filtered.map((s) => s.id.toLowerCase()));
+    const merged: Section[] = [...filtered];
+    for (const label of raw) {
+      const id = label.trim();
+      if (id && !seen.has(id.toLowerCase())) {
+        merged.push({ id, name: id, brandId, modelId });
+        seen.add(id.toLowerCase());
+      }
+    }
+    return sortSections(merged);
   }
 
   async getActivityTypes(): Promise<ActivityType[]> {
     const dictionary = await this.getDictionary();
-    return dictionary.activityTypes;
+    const base = dictionary.activityTypes;
+    const raw = dictionary.fieldChoiceOptions?.activityType;
+    if (!raw?.length) {
+      return sortActivityTypes(base);
+    }
+
+    const byKey = new Map<string, ActivityType>();
+    base.forEach((t) => byKey.set(t.id.toLowerCase(), t));
+    for (const label of raw) {
+      const id = label.trim();
+      if (id && !byKey.has(id.toLowerCase())) {
+        byKey.set(id.toLowerCase(), { id, name: id });
+      }
+    }
+    return sortActivityTypes(Array.from(byKey.values()));
   }
 
   async getActivities(activityTypeId?: string): Promise<Activity[]> {
     const dictionary = await this.getDictionary();
+    const raw = dictionary.fieldChoiceOptions?.activity;
+
     if (!activityTypeId) {
-      return dictionary.activities;
+      return sortActivities(dictionary.activities);
     }
-    return dictionary.activities.filter(
+
+    const fromDict = dictionary.activities.filter(
       (activity) => activity.activityTypeId === activityTypeId
     );
+    if (!raw?.length) {
+      return sortActivities(fromDict);
+    }
+
+    const seen = new Set(fromDict.map((a) => a.id.toLowerCase()));
+    const merged: Activity[] = [...fromDict];
+    for (const label of raw) {
+      const id = label.trim();
+      if (id && !seen.has(id.toLowerCase())) {
+        merged.push({ id, name: id, activityTypeId });
+        seen.add(id.toLowerCase());
+      }
+    }
+    return sortActivities(merged);
   }
 
   async getRecords(filters?: Partial<MachineRecord>): Promise<MachineRecord[]> {
@@ -194,6 +250,18 @@ async function extractHttpError(response: Response): Promise<string> {
   }
 
   return `HTTP ${response.status}: ${response.statusText}`;
+}
+
+function sortSections(sections: Section[]): Section[] {
+  return [...sections].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+function sortActivityTypes(types: ActivityType[]): ActivityType[] {
+  return [...types].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+}
+
+function sortActivities(activities: Activity[]): Activity[] {
+  return [...activities].sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
 function normalizeRecord(record: MachineRecord): MachineRecord {
