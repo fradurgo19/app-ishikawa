@@ -633,21 +633,81 @@ async function fetchListFieldsRows(config) {
   }
 }
 
-function choicesForFieldFromRows(rows, fieldKey) {
-  const trimmed = getTextValue(fieldKey);
-  if (!trimmed || rows.length === 0) {
-    return [];
+/**
+ * Coincide nombre configurado (.env) con fila de esquema: InternalName o Title (sin distinguir acentos).
+ * Así OData $select y escritura usan el InternalName real de la lista (p. ej. Sección vs Seccion).
+ */
+function normalizeFieldMatchKey(value) {
+  return getTextValue(value)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+function findListFieldRowByInternalOrTitle(rows, fieldKey) {
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return null;
   }
-  const wanted = trimmed.toLowerCase();
-  const match = rows.find((field) => {
-    const internal = getTextValue(field.InternalName).toLowerCase();
-    const title = getTextValue(field.Title).toLowerCase();
-    return internal === wanted || title === wanted;
-  });
+  const wanted = normalizeFieldMatchKey(fieldKey);
+  if (!wanted) {
+    return null;
+  }
+  return (
+    rows.find((field) => {
+      const internal = normalizeFieldMatchKey(field.InternalName);
+      const title = normalizeFieldMatchKey(field.Title);
+      return internal === wanted || title === wanted;
+    }) ?? null
+  );
+}
+
+function choicesForFieldFromRows(rows, fieldKey) {
+  const match = findListFieldRowByInternalOrTitle(rows, fieldKey);
   if (!match) {
     return [];
   }
   return extractAllChoicesFromFieldObject(match);
+}
+
+const FIELD_MAP_KEYS_RESOLVABLE = Object.freeze([
+  'tipoEquipo',
+  'brand',
+  'model',
+  'section',
+  'problem',
+  'activityType',
+  'activity',
+  'resource',
+  'time',
+  'createdBy',
+  'attachmentName',
+  'attachmentUrl',
+  'attachmentType',
+  'attachmentSize',
+]);
+
+/**
+ * Sustituye cada entrada del fieldMap por el InternalName real devuelto por /fields.
+ * Evita $select OData inválido o campos vacíos cuando el .env usa título visible distinto del InternalName.
+ */
+export async function resolveFieldMapWithListSchema(config) {
+  const base = config.fieldMap;
+  const rows = await fetchListFieldsRows(config);
+  if (!rows.length) {
+    return base;
+  }
+  const resolved = { ...base };
+  for (const key of FIELD_MAP_KEYS_RESOLVABLE) {
+    const configured = getTextValue(resolved[key]);
+    if (!configured) {
+      continue;
+    }
+    const match = findListFieldRowByInternalOrTitle(rows, configured);
+    if (match && getTextValue(match.InternalName)) {
+      resolved[key] = getTextValue(match.InternalName);
+    }
+  }
+  return resolved;
 }
 
 /**
@@ -751,7 +811,7 @@ async function fetchListFieldChoicesRobustInner(config, internalName) {
 }
 
 /**
- * Asegura fieldChoiceOptions con metadatos SharePoint + todo valor ya visto en ítems/diccionario
+ * Asegura fieldChoiceOptions con metadatos SharePoint +  valor ya visto en ítems/diccionario
  * (si la API de campos no devuelve Choices o la lista falló parcialmente).
  */
 export function mergeFieldChoiceOptionsFromRecordsAndDictionary(dictionary, records, fieldChoiceOptions) {

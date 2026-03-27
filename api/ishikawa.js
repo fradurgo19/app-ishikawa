@@ -9,6 +9,7 @@ import {
   getSharePointConfig,
   mapListItemToMachineRecord,
   mergeFieldChoiceOptionsFromRecordsAndDictionary,
+  resolveFieldMapWithListSchema,
 } from './_sharepoint.js';
 
 const ALLOWED_RESOURCES = Object.freeze(['records', 'dictionary']);
@@ -47,13 +48,18 @@ export default async function handler(req, res) {
     }
 
     const sharePointConfig = getSharePointConfig();
+    const sharePointConfigResolved = await withResolvedFieldMap(sharePointConfig);
 
     if (requestedResource === 'dictionary') {
       enforceMethod(req.method, ['GET']);
-      const records = await safeLoadMappedRecords(sharePointConfig);
+      const records = await safeLoadMappedRecords(sharePointConfigResolved);
       let dictionary = buildDictionaryFromRecords(records);
       try {
-        dictionary = await enrichDictionaryWithSharePointFieldChoices(sharePointConfig, dictionary, records);
+        dictionary = await enrichDictionaryWithSharePointFieldChoices(
+          sharePointConfigResolved,
+          dictionary,
+          records
+        );
       } catch {
         dictionary = {
           ...dictionary,
@@ -76,7 +82,7 @@ export default async function handler(req, res) {
     }
 
     if (requestedResource === 'records' && req.method === 'GET') {
-      const records = await safeLoadMappedRecords(sharePointConfig);
+      const records = await safeLoadMappedRecords(sharePointConfigResolved);
       const filters = extractRecordFilters(req.query);
       const filteredRecords = filterRecords(records, filters);
       sendJson(res, 200, { records: filteredRecords });
@@ -90,12 +96,12 @@ export default async function handler(req, res) {
         throw createHttpError(400, 'Request body must include a "record" object');
       }
 
-      const payload = buildRecordPayload(incomingRecord, sharePointConfig.fieldMap);
-      const createdItem = await createListItem(sharePointConfig, payload);
+      const payload = buildRecordPayload(incomingRecord, sharePointConfigResolved.fieldMap);
+      const createdItem = await createListItem(sharePointConfigResolved, payload);
       const createdRecord = mapListItemToMachineRecord(
         createdItem,
-        sharePointConfig.fieldMap,
-        sharePointConfig.siteOrigin
+        sharePointConfigResolved.fieldMap,
+        sharePointConfigResolved.siteOrigin
       );
       sendJson(res, 201, { record: createdRecord });
       return;
@@ -108,6 +114,15 @@ export default async function handler(req, res) {
       message: error.message || 'Unexpected error while processing request',
       details: error.details ?? null,
     });
+  }
+}
+
+async function withResolvedFieldMap(sharePointConfig) {
+  try {
+    const fieldMap = await resolveFieldMapWithListSchema(sharePointConfig);
+    return { ...sharePointConfig, fieldMap };
+  } catch {
+    return sharePointConfig;
   }
 }
 
