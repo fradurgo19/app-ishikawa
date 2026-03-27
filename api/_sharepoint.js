@@ -91,10 +91,29 @@ export function getSharePointConfig() {
 }
 
 export async function fetchAllListItems(config) {
+  const preferExpand =
+    process.env.SHAREPOINT_LIST_ITEMS_EXPAND_ATTACHMENTS !== 'false';
+
+  if (preferExpand) {
+    try {
+      return await fetchAllListItemsPaginated(config, true);
+    } catch {
+      return await fetchAllListItemsPaginated(config, false);
+    }
+  }
+
+  return fetchAllListItemsPaginated(config, false);
+}
+
+async function fetchAllListItemsPaginated(config, expandAttachmentFiles) {
   const accessToken = await getAccessToken(config);
   const encodedListTitle = escapeODataString(config.listTitle);
   const baseItemsUrl = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items`;
-  const initialQueryParams = buildListItemsQueryParams(config.fieldMap, config.pageSize);
+  const initialQueryParams = buildListItemsQueryParams(
+    config.fieldMap,
+    config.pageSize,
+    expandAttachmentFiles
+  );
   const initialUrl = `${baseItemsUrl}?${initialQueryParams.toString()}`;
 
   const allItems = [];
@@ -130,17 +149,16 @@ export async function fetchAllListItems(config) {
   return allItems;
 }
 
-function buildListItemsQueryParams(fieldMap, pageSize) {
+/**
+ * @param {boolean} expandAttachmentFiles Si es false, no usa $expand=AttachmentFiles (evita 400/502 en listas donde el expand falla o no aplica).
+ */
+function buildListItemsQueryParams(fieldMap, pageSize, expandAttachmentFiles = true) {
   const selectFields = new Set([
     'Id',
     'Created',
     'Modified',
     'AuthorId',
     'Attachments',
-    'AttachmentFiles',
-    'AttachmentFiles/FileName',
-    'AttachmentFiles/ServerRelativeUrl',
-    'AttachmentFiles/Length',
     fieldMap.tipoEquipo,
     fieldMap.brand,
     fieldMap.model,
@@ -157,12 +175,21 @@ function buildListItemsQueryParams(fieldMap, pageSize) {
     fieldMap.attachmentSize,
   ]);
 
+  if (expandAttachmentFiles) {
+    selectFields.add('AttachmentFiles');
+    selectFields.add('AttachmentFiles/FileName');
+    selectFields.add('AttachmentFiles/ServerRelativeUrl');
+    selectFields.add('AttachmentFiles/Length');
+  }
+
   const selectedFieldList = Array.from(selectFields).filter(Boolean).join(',');
 
   const queryParams = new URLSearchParams();
   queryParams.set('$top', String(pageSize));
   queryParams.set('$select', selectedFieldList);
-  queryParams.set('$expand', 'AttachmentFiles');
+  if (expandAttachmentFiles) {
+    queryParams.set('$expand', 'AttachmentFiles');
+  }
 
   return queryParams;
 }
@@ -500,9 +527,50 @@ function extractAllChoicesFromFieldObject(field) {
 }
 
 /**
+ * Una sola petición a /fields (evita 3× escaneos en paralelo y reduce throttling 429 en SharePoint).
+ */
+async function fetchListFieldsRows(config) {
+  try {
+    const encodedList = escapeODataString(config.listTitle);
+    const url = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedList}')/fields?$select=InternalName,Title,Choices,TypeAsString,SchemaXml&$top=500`;
+    const accessToken = await getAccessToken(config);
+    const payload = await sharePointRequest(config, accessToken, { method: 'GET', url });
+    const rows = payload.value ?? payload.d?.results ?? [];
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  }
+}
+
+function choicesForFieldFromRows(rows, fieldKey) {
+  const trimmed = getTextValue(fieldKey);
+  if (!trimmed || rows.length === 0) {
+    return [];
+  }
+  const wanted = trimmed.toLowerCase();
+  const match = rows.find((field) => {
+    const internal = getTextValue(field.InternalName).toLowerCase();
+    const title = getTextValue(field.Title).toLowerCase();
+    return internal === wanted || title === wanted;
+  });
+  if (!match) {
+    return [];
+  }
+  return extractAllChoicesFromFieldObject(match);
+}
+
+/**
  * Obtiene las opciones de un campo Choice/MultiChoice con varias rutas REST y SchemaXml como respaldo.
  */
 export async function fetchListFieldChoicesRobust(config, internalName) {
+  try {
+    return await fetchListFieldChoicesRobustInner(config, internalName);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchListFieldChoicesRobustInner(config, internalName) {
   const trimmed = getTextValue(internalName);
   if (!trimmed) {
     return [];
@@ -592,27 +660,43 @@ export async function fetchListFieldChoicesRobust(config, internalName) {
 }
 
 export async function enrichDictionaryWithSharePointFieldChoices(config, dictionary) {
-  const fieldMap = config.fieldMap;
+  try {
+    const fieldMap = config.fieldMap;
+    const rows = await fetchListFieldsRows(config);
 
-  const [sectionChoices, activityTypeChoices, activityChoices] = await Promise.all([
-    fetchListFieldChoicesRobust(config, fieldMap.section),
-    fetchListFieldChoicesRobust(config, fieldMap.activityType),
-    fetchListFieldChoicesRobust(config, fieldMap.activity),
-  ]);
+    let sectionChoices = choicesForFieldFromRows(rows, fieldMap.section);
+    let activityTypeChoices = choicesForFieldFromRows(rows, fieldMap.activityType);
+    let activityChoices = choicesForFieldFromRows(rows, fieldMap.activity);
 
-  const fieldChoiceOptions = {
-    section: sectionChoices.map((c) => getTextValue(c)).filter(Boolean),
-    activityType: activityTypeChoices.map((c) => getTextValue(c)).filter(Boolean),
-    activity: activityChoices.map((c) => getTextValue(c)).filter(Boolean),
-  };
+    if (sectionChoices.length === 0 && fieldMap.section) {
+      sectionChoices = await fetchListFieldChoicesRobust(config, fieldMap.section);
+    }
+    if (activityTypeChoices.length === 0 && fieldMap.activityType) {
+      activityTypeChoices = await fetchListFieldChoicesRobust(config, fieldMap.activityType);
+    }
+    if (activityChoices.length === 0 && fieldMap.activity) {
+      activityChoices = await fetchListFieldChoicesRobust(config, fieldMap.activity);
+    }
 
-  const merged = mergeDictionaryWithColumnChoices(dictionary, {
-    sectionChoices,
-    activityTypeChoices,
-    activityChoices,
-  });
+    const fieldChoiceOptions = {
+      section: sectionChoices.map((c) => getTextValue(c)).filter(Boolean),
+      activityType: activityTypeChoices.map((c) => getTextValue(c)).filter(Boolean),
+      activity: activityChoices.map((c) => getTextValue(c)).filter(Boolean),
+    };
 
-  return { ...merged, fieldChoiceOptions };
+    const merged = mergeDictionaryWithColumnChoices(dictionary, {
+      sectionChoices,
+      activityTypeChoices,
+      activityChoices,
+    });
+
+    return { ...merged, fieldChoiceOptions };
+  } catch {
+    return {
+      ...dictionary,
+      fieldChoiceOptions: { section: [], activityType: [], activity: [] },
+    };
+  }
 }
 
 const EXACT_MATCH_RECORD_KEYS = new Set([

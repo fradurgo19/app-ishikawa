@@ -46,7 +46,14 @@ export default async function handler(req, res) {
       enforceMethod(req.method, ['GET']);
       const records = await loadMappedRecords(sharePointConfig);
       let dictionary = buildDictionaryFromRecords(records);
-      dictionary = await enrichDictionaryWithSharePointFieldChoices(sharePointConfig, dictionary);
+      try {
+        dictionary = await enrichDictionaryWithSharePointFieldChoices(sharePointConfig, dictionary);
+      } catch {
+        dictionary = {
+          ...dictionary,
+          fieldChoiceOptions: { section: [], activityType: [], activity: [] },
+        };
+      }
       sendJson(res, 200, dictionary);
       return;
     }
