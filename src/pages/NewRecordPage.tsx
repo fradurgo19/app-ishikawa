@@ -48,11 +48,14 @@ export const NewRecordPage: React.FC = () => {
   const [marcasOptions, setMarcasOptions] = useState<{ value: string; label: string }[]>([]);
   const [modelosOptions, setModelosOptions] = useState<{ value: string; label: string }[]>([]);
   const [loading, setLoading] = useState(false);
+  /** Evita dejar los selects en disabled cuando la API devuelve listas vacías o falla (antes: disabled si length===0). */
+  const [selectOptionsLoading, setSelectOptionsLoading] = useState(true);
 
   const toSelectOptions = (labels: string[]) =>
     labels.map((t) => ({ value: t, label: t }));
 
   const loadInitialData = useCallback(async () => {
+    setSelectOptionsLoading(true);
     try {
       await sharePointService.refreshDictionary?.();
       const [equipment, activityTypesData, sectionsData, activitiesData] = await Promise.all([
@@ -69,6 +72,8 @@ export const NewRecordPage: React.FC = () => {
       setActivities(activitiesData);
     } catch (error) {
       console.error('Error cargando datos iniciales:', error);
+    } finally {
+      setSelectOptionsLoading(false);
     }
   }, []);
 
@@ -121,7 +126,7 @@ export const NewRecordPage: React.FC = () => {
                 label="Tipo de equipo *"
                 options={tiposOptions}
                 placeholder="Selecciona tipo de equipo"
-                disabled={tiposOptions.length === 0}
+                disabled={selectOptionsLoading}
                 {...register('tipoEquipoId', { required: 'El tipo de equipo es requerido' })}
                 error={errors.tipoEquipoId?.message}
               />
@@ -130,7 +135,7 @@ export const NewRecordPage: React.FC = () => {
                 label="Marca *"
                 options={marcasOptions}
                 placeholder="Selecciona marca"
-                disabled={marcasOptions.length === 0}
+                disabled={selectOptionsLoading}
                 {...register('brandId', { required: 'La marca es requerida' })}
                 error={errors.brandId?.message}
               />
@@ -139,7 +144,7 @@ export const NewRecordPage: React.FC = () => {
                 label="Modelo *"
                 options={modelosOptions}
                 placeholder="Selecciona modelo"
-                disabled={modelosOptions.length === 0}
+                disabled={selectOptionsLoading}
                 {...register('modelId', { required: 'El modelo es requerido' })}
                 error={errors.modelId?.message}
               />
@@ -149,7 +154,7 @@ export const NewRecordPage: React.FC = () => {
               label="Sección *"
               options={sections.map((s) => ({ value: s.id, label: s.name }))}
               placeholder="Selecciona una sección"
-              disabled={sections.length === 0}
+              disabled={selectOptionsLoading}
               {...register('sectionId', { required: 'La sección es requerida' })}
               error={errors.sectionId?.message}
             />
@@ -168,6 +173,7 @@ export const NewRecordPage: React.FC = () => {
                 label="Tipo de Actividad *"
                 options={activityTypes.map((at) => ({ value: at.id, label: at.name }))}
                 placeholder="Selecciona tipo de actividad"
+                disabled={selectOptionsLoading}
                 {...register('activityTypeId', { required: 'El tipo de actividad es requerido' })}
                 error={errors.activityTypeId?.message}
               />
@@ -176,7 +182,7 @@ export const NewRecordPage: React.FC = () => {
                 label="Actividad *"
                 options={activities.map((a) => ({ value: a.id, label: a.name }))}
                 placeholder="Selecciona actividad"
-                disabled={activities.length === 0}
+                disabled={selectOptionsLoading}
                 {...register('activityId', { required: 'La actividad es requerida' })}
                 error={errors.activityId?.message}
               />
