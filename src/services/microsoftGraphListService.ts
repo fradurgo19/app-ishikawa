@@ -48,6 +48,126 @@ async function graphFetchJson<T>(url: string, accessToken: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+async function graphPostJson<T>(url: string, accessToken: string, body: unknown): Promise<T> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Microsoft Graph ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+/** Misma forma que el payload del API (sin id ni fechas de servidor). */
+export type GraphCreateRecordInput = Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'>;
+
+function requireNonEmpty(value: string, fieldName: string): string {
+  const t = (value ?? '').trim();
+  if (!t) {
+    throw new Error(`Field "${fieldName}" is required`);
+  }
+  return t;
+}
+
+function normalizeTimeForGraph(raw: number): number {
+  if (!Number.isFinite(raw) || raw < 0) {
+    throw new Error('Field "time" must be a non-negative number');
+  }
+  return raw;
+}
+
+/**
+ * Nombres internos de columna → valores para POST .../items con permisos delegados (Graph).
+ * Alineado con buildRecordPayload del servidor (_sharepoint.js).
+ */
+export function buildGraphListItemFields(
+  record: GraphCreateRecordInput,
+  fieldMap: ClientFieldMap
+): Record<string, string | number> {
+  const fields: Record<string, string | number> = {};
+
+  fields[fieldMap.brand] = requireNonEmpty(record.brandId, 'brandId');
+  fields[fieldMap.model] = requireNonEmpty(record.modelId, 'modelId');
+  fields[fieldMap.section] = requireNonEmpty(record.sectionId, 'sectionId');
+  fields[fieldMap.problem] = requireNonEmpty(record.problem, 'problem');
+  fields[fieldMap.activityType] = requireNonEmpty(record.activityTypeId, 'activityTypeId');
+  fields[fieldMap.activity] = requireNonEmpty(record.activityId, 'activityId');
+
+  if (fieldMap.tipoEquipo?.trim()) {
+    fields[fieldMap.tipoEquipo] = requireNonEmpty(record.tipoEquipoId, 'tipoEquipoId');
+  }
+
+  if (fieldMap.time?.trim()) {
+    fields[fieldMap.time] = normalizeTimeForGraph(record.time);
+  }
+
+  const resource = (record.resource ?? '').trim();
+  if (fieldMap.resource?.trim() && resource) {
+    fields[fieldMap.resource] = resource;
+  }
+
+  const createdBy = (record.createdBy ?? '').trim();
+  if (fieldMap.createdBy?.trim() && createdBy) {
+    fields[fieldMap.createdBy] = createdBy;
+  }
+
+  const att = record.attachment;
+  if (att) {
+    if (fieldMap.attachmentName?.trim()) {
+      fields[fieldMap.attachmentName] = att.name;
+    }
+    if (fieldMap.attachmentUrl?.trim()) {
+      fields[fieldMap.attachmentUrl] = att.url;
+    }
+    if (fieldMap.attachmentType?.trim()) {
+      fields[fieldMap.attachmentType] = att.type;
+    }
+    if (fieldMap.attachmentSize?.trim()) {
+      fields[fieldMap.attachmentSize] = att.size;
+    }
+  }
+
+  return fields;
+}
+
+export async function createSharePointListItemViaMicrosoftGraph(options: {
+  siteUrl: string;
+  listName: string;
+  fieldMap: ClientFieldMap;
+  accessToken: string;
+  record: GraphCreateRecordInput;
+}): Promise<MachineRecord> {
+  const { siteUrl, listName, fieldMap, accessToken, record } = options;
+
+  const siteId = await resolveGraphSiteId(siteUrl, accessToken);
+  const listId = await resolveGraphListId(siteId, listName, accessToken);
+  const fieldsPayload = buildGraphListItemFields(record, fieldMap);
+  const createUrl = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items`;
+
+  const created = await graphPostJson<GraphListItem>(createUrl, accessToken, { fields: fieldsPayload });
+
+  const hasFields = created.fields && Object.keys(created.fields).length > 0;
+  if (hasFields) {
+    return mapGraphListItemToMachineRecord(created, fieldMap);
+  }
+
+  const itemId = String(created.id);
+  const expanded = await graphFetchJson<GraphListItem>(
+    `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${itemId}?$expand=fields`,
+    accessToken
+  );
+  return mapGraphListItemToMachineRecord(expanded, fieldMap);
+}
+
 export async function resolveGraphSiteId(siteUrl: string, accessToken: string): Promise<string> {
   const normalized = siteUrl.replace(/\/$/, '');
   const url = new URL(normalized);

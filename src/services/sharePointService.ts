@@ -12,7 +12,10 @@ import { isMicrosoftAuthEnabled } from '../config/authConfig';
 import { getClientFieldMap } from '../config/clientSharePointFieldMap';
 import { filterMachineRecords } from '../utils/filterMachineRecords';
 import { authService } from './authService';
-import { fetchSharePointListViaMicrosoftGraph } from './microsoftGraphListService';
+import {
+  createSharePointListItemViaMicrosoftGraph,
+  fetchSharePointListViaMicrosoftGraph,
+} from './microsoftGraphListService';
 import { sharePointService as mockSharePointService } from './mockSharePointService';
 
 type CreateRecordInput = Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt' | 'attachment'> & {
@@ -103,6 +106,14 @@ function isMicrosoftGraphListMode(): boolean {
   const siteUrl = graphListEnvSiteUrl();
   const listName = graphListEnvListName();
   return Boolean(siteUrl && listName);
+}
+
+/**
+ * Sin credenciales de aplicación en servidor: crear/leer lista solo con token delegado (MSAL).
+ * Si falla Graph, no se reintenta POST /api/ishikawa; si no hay sesión, crear falla con mensaje claro.
+ */
+function isDelegatedOnlySharePointMode(): boolean {
+  return import.meta.env.VITE_SHAREPOINT_DELEGATED_ONLY === 'true';
 }
 
 /** Origen absoluto del API (producción mismo sitio: vacío). En dev con Vite, suele bastar el proxy /api. */
@@ -378,9 +389,40 @@ class LiveSharePointService implements SharePointDataService {
   }
 
   async createRecord(record: CreateRecordInput): Promise<MachineRecord> {
-    const payload = {
-      record: normalizeCreateRecordInput(record),
-    };
+    const normalized = normalizeCreateRecordInput(record);
+
+    if (isMicrosoftGraphListMode()) {
+      await authService.initializeAuth();
+      const token = await authService.acquireGraphAccessToken();
+      if (token) {
+        try {
+          const created = await createSharePointListItemViaMicrosoftGraph({
+            siteUrl: graphListEnvSiteUrl(),
+            listName: graphListEnvListName(),
+            fieldMap: getClientFieldMap(),
+            accessToken: token,
+            record: normalized,
+          });
+          this.dictionaryCache = null;
+          this.graphDataLoader = null;
+          return normalizeRecord(created);
+        } catch (graphError) {
+          if (isDelegatedOnlySharePointMode()) {
+            const detail =
+              graphError instanceof Error ? graphError.message : 'Error desconocido al crear en Graph';
+            throw new Error(
+              `No se pudo crear el registro con Microsoft Graph (permisos delegados). ${detail}`
+            );
+          }
+        }
+      } else if (isDelegatedOnlySharePointMode()) {
+        throw new Error(
+          'Inicie sesión con Microsoft para guardar registros. Este entorno usa solo permisos delegados.'
+        );
+      }
+    }
+
+    const payload = { record: normalized };
 
     const response = await requestJson<RecordResponse>(apiUrl('/api/ishikawa?resource=records'), {
       method: 'POST',

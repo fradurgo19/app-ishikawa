@@ -15,6 +15,11 @@ interface ImportMetaEnv {
   readonly VITE_SHAREPOINT_LIST_TITLE?: string;
   /** `false` desactiva Graph y usa solo GET /api/ishikawa para diccionario y registros. */
   readonly VITE_USE_MICROSOFT_GRAPH_LIST?: string;
+  /**
+   * `true`: lectura/escritura de lista solo con token MSAL (Graph); sin reintento a /api/ishikawa al crear
+   * si Graph falla; crear sin sesión muestra error explícito. Útil sin permisos de aplicación en el servidor.
+   */
+  readonly VITE_SHAREPOINT_DELEGATED_ONLY?: string;
   /** Nombres internos de columnas (alinear con Graph fields / lista SharePoint). */
   readonly VITE_SHAREPOINT_FIELD_TIPO_EQUIPO?: string;
   readonly VITE_SHAREPOINT_FIELD_BRAND?: string;
