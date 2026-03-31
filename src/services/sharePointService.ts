@@ -69,6 +69,14 @@ interface SharePointDataService {
 
 const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true';
 
+/** Origen absoluto del API (producción mismo sitio: vacío). En dev con Vite, suele bastar el proxy /api. */
+function apiUrl(pathWithQuery: string): string {
+  const raw = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? '';
+  const base = raw.replace(/\/$/, '');
+  const path = pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`;
+  return base ? `${base}${path}` : path;
+}
+
 class LiveSharePointService implements SharePointDataService {
   private dictionaryCache: Promise<DictionaryResponse> | null = null;
 
@@ -260,7 +268,7 @@ class LiveSharePointService implements SharePointDataService {
       }
     });
 
-    const response = await requestJson<RecordsResponse>(`/api/ishikawa?${queryParams.toString()}`);
+    const response = await requestJson<RecordsResponse>(apiUrl(`/api/ishikawa?${queryParams.toString()}`));
     return response.records.map((record) => normalizeRecord(record));
   }
 
@@ -269,7 +277,7 @@ class LiveSharePointService implements SharePointDataService {
       record: normalizeCreateRecordInput(record),
     };
 
-    const response = await requestJson<RecordResponse>('/api/ishikawa?resource=records', {
+    const response = await requestJson<RecordResponse>(apiUrl('/api/ishikawa?resource=records'), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
@@ -289,7 +297,7 @@ class LiveSharePointService implements SharePointDataService {
   }
 
   private async getDictionary(): Promise<DictionaryResponse> {
-    this.dictionaryCache ??= requestJson<DictionaryResponse>('/api/ishikawa?resource=dictionary');
+    this.dictionaryCache ??= requestJson<DictionaryResponse>(apiUrl('/api/ishikawa?resource=dictionary'));
 
     try {
       return await this.dictionaryCache;

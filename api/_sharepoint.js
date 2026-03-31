@@ -80,7 +80,7 @@ export function getSharePointConfig() {
   return {
     siteUrl: process.env.SHAREPOINT_SITE_URL.replace(/\/$/, ''),
     siteOrigin: parsedSiteUrl.origin,
-    listTitle: process.env.SHAREPOINT_LIST_TITLE,
+    listTitle: getTextValue(process.env.SHAREPOINT_LIST_TITLE),
     tenantId: process.env.SHAREPOINT_TENANT_ID,
     clientId: process.env.SHAREPOINT_CLIENT_ID,
     clientSecret: process.env.SHAREPOINT_CLIENT_SECRET,
@@ -109,10 +109,12 @@ async function fetchAllListItemsPaginated(config, expandAttachmentFiles) {
   const accessToken = await getAccessToken(config);
   const encodedListTitle = escapeODataString(config.listTitle);
   const baseItemsUrl = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items`;
+  const schemaRows = await fetchListFieldsRows(config);
   const initialQueryParams = buildListItemsQueryParams(
     config.fieldMap,
     config.pageSize,
-    expandAttachmentFiles
+    expandAttachmentFiles,
+    schemaRows
   );
   const initialUrl = `${baseItemsUrl}?${initialQueryParams.toString()}`;
 
@@ -150,30 +152,39 @@ async function fetchAllListItemsPaginated(config, expandAttachmentFiles) {
 }
 
 /**
+ * Solo incluye en $select columnas que existen en /fields. Un InternalName erróneo en OData
+ * rechaza toda la petición y en producción safeLoadMappedRecords devolvía [] sin registros visibles.
+ *
+ * @param {Array<{InternalName?: string}>} schemaRows filas de fetchListFieldsRows (vacío = sin filtrar).
  * @param {boolean} expandAttachmentFiles Si es false, no usa $expand=AttachmentFiles (evita 400/502 en listas donde el expand falla o no aplica).
  */
-function buildListItemsQueryParams(fieldMap, pageSize, expandAttachmentFiles = true) {
-  const selectFields = new Set([
-    'Id',
-    'Created',
-    'Modified',
-    'AuthorId',
-    'Attachments',
-    fieldMap.tipoEquipo,
-    fieldMap.brand,
-    fieldMap.model,
-    fieldMap.section,
-    fieldMap.problem,
-    fieldMap.activityType,
-    fieldMap.activity,
-    fieldMap.resource,
-    fieldMap.time,
-    fieldMap.createdBy,
-    fieldMap.attachmentName,
-    fieldMap.attachmentUrl,
-    fieldMap.attachmentType,
-    fieldMap.attachmentSize,
-  ]);
+function buildListItemsQueryParams(fieldMap, pageSize, expandAttachmentFiles = true, schemaRows = []) {
+  const selectFields = new Set(['Id', 'Created', 'Modified', 'AuthorId', 'Attachments']);
+
+  const canonicalByLower = new Map();
+  if (Array.isArray(schemaRows) && schemaRows.length > 0) {
+    for (const row of schemaRows) {
+      const internal = getTextValue(row.InternalName);
+      if (internal) {
+        canonicalByLower.set(internal.toLowerCase(), internal);
+      }
+    }
+  }
+
+  const mappedNames = Object.values(fieldMap)
+    .map((v) => getTextValue(v))
+    .filter(Boolean);
+
+  if (canonicalByLower.size === 0) {
+    mappedNames.forEach((name) => selectFields.add(name));
+  } else {
+    for (const name of mappedNames) {
+      const canonical = canonicalByLower.get(name.toLowerCase());
+      if (canonical) {
+        selectFields.add(canonical);
+      }
+    }
+  }
 
   if (expandAttachmentFiles) {
     selectFields.add('AttachmentFiles');

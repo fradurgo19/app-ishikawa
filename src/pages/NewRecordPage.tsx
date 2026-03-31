@@ -50,12 +50,14 @@ export const NewRecordPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   /** Evita dejar los selects en disabled cuando la API devuelve listas vacías o falla (antes: disabled si length===0). */
   const [selectOptionsLoading, setSelectOptionsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const toSelectOptions = (labels: string[]) =>
     labels.map((t) => ({ value: t, label: t }));
 
   const loadInitialData = useCallback(async () => {
     setSelectOptionsLoading(true);
+    setLoadError(null);
     try {
       await sharePointService.refreshDictionary?.();
       const [equipment, activityTypesData, sectionsData, activitiesData] = await Promise.all([
@@ -72,6 +74,9 @@ export const NewRecordPage: React.FC = () => {
       setActivities(activitiesData);
     } catch (error) {
       console.error('Error cargando datos iniciales:', error);
+      const message =
+        error instanceof Error ? error.message : 'No se pudo cargar el diccionario desde /api/ishikawa';
+      setLoadError(message);
     } finally {
       setSelectOptionsLoading(false);
     }
@@ -120,6 +125,24 @@ export const NewRecordPage: React.FC = () => {
         </div>
 
         <Card className="p-8">
+          {loadError && (
+            <div
+              className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+              role="alert"
+            >
+              <p className="font-medium">No se pudieron cargar las opciones desde SharePoint (API)</p>
+              <p className="mt-1 text-amber-800">{loadError}</p>
+              <p className="mt-2 text-amber-800">
+                En local: ejecuta <code className="rounded bg-amber-100 px-1">npx vercel dev</code> (con variables
+                SHAREPOINT_* en .env) y deja Vite con proxy a ese puerto, o define{' '}
+                <code className="rounded bg-amber-100 px-1">VITE_API_BASE_URL</code> apuntando al origen donde corre
+                /api.
+              </p>
+              <Button type="button" variant="outline" className="mt-3" onClick={() => void loadInitialData()}>
+                Reintentar
+              </Button>
+            </div>
+          )}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <Select
