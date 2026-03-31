@@ -93,16 +93,84 @@ export function getSharePointConfig() {
 export async function fetchAllListItems(config) {
   const preferExpand =
     process.env.SHAREPOINT_LIST_ITEMS_EXPAND_ATTACHMENTS !== 'false';
+  const allowFieldTextFallback = process.env.SHAREPOINT_LIST_ITEMS_FIELDTEXT_FALLBACK !== 'false';
 
-  if (preferExpand) {
+  let items;
+  try {
+    if (preferExpand) {
+      try {
+        items = await fetchAllListItemsPaginated(config, true);
+      } catch {
+        items = await fetchAllListItemsPaginated(config, false);
+      }
+    } else {
+      items = await fetchAllListItemsPaginated(config, false);
+    }
+  } catch (primaryErr) {
+    if (!allowFieldTextFallback) {
+      throw primaryErr;
+    }
     try {
-      return await fetchAllListItemsPaginated(config, true);
+      return await fetchAllListItemsFieldValuesAsTextPaginated(config);
     } catch {
-      return await fetchAllListItemsPaginated(config, false);
+      throw primaryErr;
     }
   }
 
-  return fetchAllListItemsPaginated(config, false);
+  if (allowFieldTextFallback && Array.isArray(items) && items.length === 0) {
+    try {
+      const viaText = await fetchAllListItemsFieldValuesAsTextPaginated(config);
+      if (viaText.length > 0) {
+        return viaText;
+      }
+    } catch {
+      /* mantener [] si la lista está vacía o FVA también falla */
+    }
+  }
+
+  return items;
+}
+
+async function fetchAllListItemsFieldValuesAsTextPaginated(config) {
+  const accessToken = await getAccessToken(config);
+  const encodedListTitle = escapeODataString(config.listTitle);
+  const baseItemsUrl = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items`;
+  const queryParams = new URLSearchParams();
+  queryParams.set('$top', String(config.pageSize));
+  queryParams.set('$select', 'Id,Created,Modified,AuthorId,Attachments');
+  queryParams.set('$expand', 'FieldValuesAsText');
+
+  const allItems = [];
+  let nextUrl = `${baseItemsUrl}?${queryParams.toString()}`;
+  let requestCount = 0;
+
+  while (nextUrl && requestCount < MAX_PAGINATION_REQUESTS) {
+    requestCount += 1;
+    const responsePayload = await sharePointRequest(config, accessToken, {
+      method: 'GET',
+      url: nextUrl,
+    });
+
+    if (Array.isArray(responsePayload.value)) {
+      allItems.push(...responsePayload.value);
+    }
+
+    const responseNextLink =
+      responsePayload['@odata.nextLink'] ||
+      responsePayload['odata.nextLink'] ||
+      responsePayload.d?.__next ||
+      null;
+    nextUrl = typeof responseNextLink === 'string' ? responseNextLink : null;
+  }
+
+  if (requestCount >= MAX_PAGINATION_REQUESTS && nextUrl) {
+    throw createHttpError(
+      502,
+      `Pagination limit reached (${MAX_PAGINATION_REQUESTS} requests). Narrow list size or increase limit.`
+    );
+  }
+
+  return allItems;
 }
 
 async function fetchAllListItemsPaginated(config, expandAttachmentFiles) {
@@ -217,6 +285,41 @@ export async function createListItem(config, payload) {
   });
 }
 
+function getItemFieldText(item, internalName) {
+  const key = getTextValue(internalName);
+  if (!key || !item || typeof item !== 'object') {
+    return '';
+  }
+  const direct = item[key];
+  if (direct !== undefined && direct !== null) {
+    const t = getTextValue(direct);
+    if (t) {
+      return t;
+    }
+  }
+  const fvt = item.FieldValuesAsText || item.fieldValuesAsText;
+  if (fvt && typeof fvt === 'object') {
+    return getTextValue(fvt[key]);
+  }
+  return '';
+}
+
+function getItemFieldNumeric(item, internalName) {
+  const key = getTextValue(internalName);
+  if (!key || !item || typeof item !== 'object') {
+    return 0;
+  }
+  const direct = item[key];
+  if (direct !== undefined && direct !== null && direct !== '') {
+    return getNumericValue(direct);
+  }
+  const fvt = item.FieldValuesAsText || item.fieldValuesAsText;
+  if (fvt && typeof fvt === 'object' && fvt[key] !== undefined && fvt[key] !== null && fvt[key] !== '') {
+    return getNumericValue(fvt[key]);
+  }
+  return 0;
+}
+
 export function mapListItemToMachineRecord(item, fieldMap, siteOrigin = '') {
   const nativeAttachment = extractNativeAttachment(item, siteOrigin);
   const customAttachment = extractCustomAttachment(item, fieldMap);
@@ -224,17 +327,17 @@ export function mapListItemToMachineRecord(item, fieldMap, siteOrigin = '') {
 
   const mappedRecord = {
     id: getTextValue(item.Id ?? item.ID ?? ''),
-    tipoEquipoId: fieldMap.tipoEquipo ? getTextValue(item[fieldMap.tipoEquipo]) : '',
-    brandId: getTextValue(item[fieldMap.brand]),
-    modelId: getTextValue(item[fieldMap.model]),
-    sectionId: getTextValue(item[fieldMap.section]),
-    problem: getTextValue(item[fieldMap.problem]),
-    activityTypeId: getTextValue(item[fieldMap.activityType]),
-    activityId: getTextValue(item[fieldMap.activity]),
-    resource: fieldMap.resource ? getTextValue(item[fieldMap.resource]) : '',
-    time: fieldMap.time ? getNumericValue(item[fieldMap.time]) : 0,
+    tipoEquipoId: fieldMap.tipoEquipo ? getItemFieldText(item, fieldMap.tipoEquipo) : '',
+    brandId: getItemFieldText(item, fieldMap.brand),
+    modelId: getItemFieldText(item, fieldMap.model),
+    sectionId: getItemFieldText(item, fieldMap.section),
+    problem: getItemFieldText(item, fieldMap.problem),
+    activityTypeId: getItemFieldText(item, fieldMap.activityType),
+    activityId: getItemFieldText(item, fieldMap.activity),
+    resource: fieldMap.resource ? getItemFieldText(item, fieldMap.resource) : '',
+    time: fieldMap.time ? getItemFieldNumeric(item, fieldMap.time) : 0,
     createdBy: fieldMap.createdBy
-      ? getTextValue(item[fieldMap.createdBy] ?? item.AuthorId ?? 'system')
+      ? getTextValue(getItemFieldText(item, fieldMap.createdBy) || item.AuthorId || 'system')
       : getTextValue(item.AuthorId ?? 'system'),
     createdAt: toIsoString(item.Created),
     updatedAt: toIsoString(item.Modified),
@@ -1145,10 +1248,10 @@ function extractNativeAttachment(item, siteOrigin) {
 }
 
 function extractCustomAttachment(item, fieldMap) {
-  const attachmentName = getTextValue(item[fieldMap.attachmentName]);
-  const attachmentUrl = getTextValue(item[fieldMap.attachmentUrl]);
-  const attachmentType = getTextValue(item[fieldMap.attachmentType]);
-  const attachmentSize = getNumericValue(item[fieldMap.attachmentSize]);
+  const attachmentName = getItemFieldText(item, fieldMap.attachmentName);
+  const attachmentUrl = getItemFieldText(item, fieldMap.attachmentUrl);
+  const attachmentType = getItemFieldText(item, fieldMap.attachmentType);
+  const attachmentSize = getItemFieldNumeric(item, fieldMap.attachmentSize);
   const hasAttachment = Boolean(attachmentName || attachmentUrl);
 
   if (!hasAttachment) {
