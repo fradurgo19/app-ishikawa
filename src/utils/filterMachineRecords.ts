@@ -10,6 +10,20 @@ const EXACT_MATCH_KEYS = new Set<keyof MachineRecord>([
   'createdBy',
 ]);
 
+function machineRecordFieldAsFilterString(record: MachineRecord, key: keyof MachineRecord): string {
+  const value = record[key];
+  if (value === null || value === undefined) {
+    return '';
+  }
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    return String(value);
+  }
+  return '';
+}
+
 export function filterMachineRecords(
   records: MachineRecord[],
   filters: Partial<MachineRecord>
@@ -24,7 +38,7 @@ export function filterMachineRecords(
 
   return records.filter((record) =>
     entries.every(([key, filterValue]) => {
-      const recordValue = String(record[key] ?? '').trim();
+      const recordValue = machineRecordFieldAsFilterString(record, key);
       const fv = filterValue.trim();
       if (!recordValue || !fv) {
         return false;

@@ -226,39 +226,51 @@ async function fetchAllListItemsPaginated(config, expandAttachmentFiles) {
  * @param {Array<{InternalName?: string}>} schemaRows filas de fetchListFieldsRows (vacío = sin filtrar).
  * @param {boolean} expandAttachmentFiles Si es false, no usa $expand=AttachmentFiles (evita 400/502 en listas donde el expand falla o no aplica).
  */
-function buildListItemsQueryParams(fieldMap, pageSize, expandAttachmentFiles = true, schemaRows = []) {
-  const selectFields = new Set(['Id', 'Created', 'Modified', 'AuthorId', 'Attachments']);
-
+function buildCanonicalInternalNameMap(schemaRows) {
   const canonicalByLower = new Map();
-  if (Array.isArray(schemaRows) && schemaRows.length > 0) {
-    for (const row of schemaRows) {
-      const internal = getTextValue(row.InternalName);
-      if (internal) {
-        canonicalByLower.set(internal.toLowerCase(), internal);
-      }
+  if (!Array.isArray(schemaRows) || schemaRows.length === 0) {
+    return canonicalByLower;
+  }
+  for (const row of schemaRows) {
+    const internal = getTextValue(row.InternalName);
+    if (internal) {
+      canonicalByLower.set(internal.toLowerCase(), internal);
     }
   }
+  return canonicalByLower;
+}
 
+function mergeMappedFieldNamesIntoSelect(selectFields, fieldMap, canonicalByLower) {
   const mappedNames = Object.values(fieldMap)
     .map((v) => getTextValue(v))
     .filter(Boolean);
 
   if (canonicalByLower.size === 0) {
     mappedNames.forEach((name) => selectFields.add(name));
-  } else {
-    for (const name of mappedNames) {
-      const canonical = canonicalByLower.get(name.toLowerCase());
-      if (canonical) {
-        selectFields.add(canonical);
-      }
+    return;
+  }
+  for (const name of mappedNames) {
+    const canonical = canonicalByLower.get(name.toLowerCase());
+    if (canonical) {
+      selectFields.add(canonical);
     }
   }
+}
+
+function appendAttachmentSelectFieldNames(selectFields) {
+  selectFields.add('AttachmentFiles');
+  selectFields.add('AttachmentFiles/FileName');
+  selectFields.add('AttachmentFiles/ServerRelativeUrl');
+  selectFields.add('AttachmentFiles/Length');
+}
+
+function buildListItemsQueryParams(fieldMap, pageSize, expandAttachmentFiles = true, schemaRows = []) {
+  const selectFields = new Set(['Id', 'Created', 'Modified', 'AuthorId', 'Attachments']);
+  const canonicalByLower = buildCanonicalInternalNameMap(schemaRows);
+  mergeMappedFieldNamesIntoSelect(selectFields, fieldMap, canonicalByLower);
 
   if (expandAttachmentFiles) {
-    selectFields.add('AttachmentFiles');
-    selectFields.add('AttachmentFiles/FileName');
-    selectFields.add('AttachmentFiles/ServerRelativeUrl');
-    selectFields.add('AttachmentFiles/Length');
+    appendAttachmentSelectFieldNames(selectFields);
   }
 
   const selectedFieldList = Array.from(selectFields).filter(Boolean).join(',');
@@ -755,7 +767,7 @@ function normalizeFieldMatchKey(value) {
   return getTextValue(value)
     .toLowerCase()
     .normalize('NFD')
-    .replace(/\p{M}/gu, '');
+    .replaceAll(/\p{M}/gu, '');
 }
 
 function findListFieldRowByInternalOrTitle(rows, fieldKey) {
