@@ -9,6 +9,8 @@ import {
 
 const GRAPH_ROOT = 'https://graph.microsoft.com/v1.0';
 
+const GRAPH_ERROR_BODY_MAX = 200;
+
 interface GraphODataPage<T> {
   value?: T[];
   '@odata.nextLink'?: string;
@@ -32,36 +34,38 @@ export interface GraphListBundle {
   dictionary: DictionaryFromRecordsShape & { fieldChoiceOptions: FieldChoiceOptionsShape };
 }
 
-async function graphFetchJson<T>(url: string, accessToken: string): Promise<T> {
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-    },
-  });
-
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Microsoft Graph ${response.status}: ${body.slice(0, 200)}`);
-  }
-
-  return (await response.json()) as T;
+function graphHttpErrorMessage(status: number, bodyText: string): string {
+  return `Microsoft Graph ${status}: ${bodyText.slice(0, GRAPH_ERROR_BODY_MAX)}`;
 }
 
-async function graphPostJson<T>(url: string, accessToken: string, body: unknown): Promise<T> {
+interface GraphJsonRequestOptions {
+  method?: string;
+  body?: unknown;
+}
+
+async function graphRequestJson<T>(
+  url: string,
+  accessToken: string,
+  options: GraphJsonRequestOptions = {}
+): Promise<T> {
+  const method = options.method ?? 'GET';
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/json',
+  };
+  if (options.body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
+    method,
+    headers,
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Microsoft Graph ${response.status}: ${text.slice(0, 200)}`);
+    throw new Error(graphHttpErrorMessage(response.status, text));
   }
 
   return (await response.json()) as T;
@@ -85,6 +89,72 @@ function normalizeTimeForGraph(raw: number): number {
   return raw;
 }
 
+function setRequiredGraphListFields(
+  fields: Record<string, string | number>,
+  record: GraphCreateRecordInput,
+  fieldMap: ClientFieldMap
+): void {
+  fields[fieldMap.brand] = requireNonEmpty(record.brandId, 'brandId');
+  fields[fieldMap.model] = requireNonEmpty(record.modelId, 'modelId');
+  fields[fieldMap.section] = requireNonEmpty(record.sectionId, 'sectionId');
+  fields[fieldMap.problem] = requireNonEmpty(record.problem, 'problem');
+  fields[fieldMap.activityType] = requireNonEmpty(record.activityTypeId, 'activityTypeId');
+  fields[fieldMap.activity] = requireNonEmpty(record.activityId, 'activityId');
+}
+
+function setOptionalTipoEquipoAndTime(
+  fields: Record<string, string | number>,
+  record: GraphCreateRecordInput,
+  fieldMap: ClientFieldMap
+): void {
+  if (fieldMap.tipoEquipo?.trim()) {
+    fields[fieldMap.tipoEquipo] = requireNonEmpty(record.tipoEquipoId, 'tipoEquipoId');
+  }
+  if (fieldMap.time?.trim()) {
+    fields[fieldMap.time] = normalizeTimeForGraph(record.time);
+  }
+}
+
+function setOptionalResourceAndCreatedBy(
+  fields: Record<string, string | number>,
+  record: GraphCreateRecordInput,
+  fieldMap: ClientFieldMap
+): void {
+  const resource = (record.resource ?? '').trim();
+  if (fieldMap.resource?.trim() && resource) {
+    fields[fieldMap.resource] = resource;
+  }
+  const createdBy = (record.createdBy ?? '').trim();
+  if (fieldMap.createdBy?.trim() && createdBy) {
+    fields[fieldMap.createdBy] = createdBy;
+  }
+}
+
+function putMappedColumn(
+  fields: Record<string, string | number>,
+  internalName: string | undefined,
+  value: string | number
+): void {
+  if (internalName?.trim()) {
+    fields[internalName] = value;
+  }
+}
+
+function setOptionalAttachmentGraphFields(
+  fields: Record<string, string | number>,
+  record: GraphCreateRecordInput,
+  fieldMap: ClientFieldMap
+): void {
+  const att = record.attachment;
+  if (!att) {
+    return;
+  }
+  putMappedColumn(fields, fieldMap.attachmentName, att.name);
+  putMappedColumn(fields, fieldMap.attachmentUrl, att.url);
+  putMappedColumn(fields, fieldMap.attachmentType, att.type);
+  putMappedColumn(fields, fieldMap.attachmentSize, att.size);
+}
+
 /**
  * Nombres internos de columna → valores para POST .../items con permisos delegados (Graph).
  * Alineado con buildRecordPayload del servidor (_sharepoint.js).
@@ -94,48 +164,10 @@ export function buildGraphListItemFields(
   fieldMap: ClientFieldMap
 ): Record<string, string | number> {
   const fields: Record<string, string | number> = {};
-
-  fields[fieldMap.brand] = requireNonEmpty(record.brandId, 'brandId');
-  fields[fieldMap.model] = requireNonEmpty(record.modelId, 'modelId');
-  fields[fieldMap.section] = requireNonEmpty(record.sectionId, 'sectionId');
-  fields[fieldMap.problem] = requireNonEmpty(record.problem, 'problem');
-  fields[fieldMap.activityType] = requireNonEmpty(record.activityTypeId, 'activityTypeId');
-  fields[fieldMap.activity] = requireNonEmpty(record.activityId, 'activityId');
-
-  if (fieldMap.tipoEquipo?.trim()) {
-    fields[fieldMap.tipoEquipo] = requireNonEmpty(record.tipoEquipoId, 'tipoEquipoId');
-  }
-
-  if (fieldMap.time?.trim()) {
-    fields[fieldMap.time] = normalizeTimeForGraph(record.time);
-  }
-
-  const resource = (record.resource ?? '').trim();
-  if (fieldMap.resource?.trim() && resource) {
-    fields[fieldMap.resource] = resource;
-  }
-
-  const createdBy = (record.createdBy ?? '').trim();
-  if (fieldMap.createdBy?.trim() && createdBy) {
-    fields[fieldMap.createdBy] = createdBy;
-  }
-
-  const att = record.attachment;
-  if (att) {
-    if (fieldMap.attachmentName?.trim()) {
-      fields[fieldMap.attachmentName] = att.name;
-    }
-    if (fieldMap.attachmentUrl?.trim()) {
-      fields[fieldMap.attachmentUrl] = att.url;
-    }
-    if (fieldMap.attachmentType?.trim()) {
-      fields[fieldMap.attachmentType] = att.type;
-    }
-    if (fieldMap.attachmentSize?.trim()) {
-      fields[fieldMap.attachmentSize] = att.size;
-    }
-  }
-
+  setRequiredGraphListFields(fields, record, fieldMap);
+  setOptionalTipoEquipoAndTime(fields, record, fieldMap);
+  setOptionalResourceAndCreatedBy(fields, record, fieldMap);
+  setOptionalAttachmentGraphFields(fields, record, fieldMap);
   return fields;
 }
 
@@ -153,7 +185,10 @@ export async function createSharePointListItemViaMicrosoftGraph(options: {
   const fieldsPayload = buildGraphListItemFields(record, fieldMap);
   const createUrl = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items`;
 
-  const created = await graphPostJson<GraphListItem>(createUrl, accessToken, { fields: fieldsPayload });
+  const created = await graphRequestJson<GraphListItem>(createUrl, accessToken, {
+    method: 'POST',
+    body: { fields: fieldsPayload },
+  });
 
   const hasFields = created.fields && Object.keys(created.fields).length > 0;
   if (hasFields) {
@@ -161,7 +196,7 @@ export async function createSharePointListItemViaMicrosoftGraph(options: {
   }
 
   const itemId = String(created.id);
-  const expanded = await graphFetchJson<GraphListItem>(
+  const expanded = await graphRequestJson<GraphListItem>(
     `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${itemId}?$expand=fields`,
     accessToken
   );
@@ -175,7 +210,7 @@ export async function resolveGraphSiteId(siteUrl: string, accessToken: string): 
   const path = url.pathname || '';
   const siteIdentifier = `${hostname}:${path}`;
   const encoded = encodeURIComponent(siteIdentifier);
-  const data = await graphFetchJson<{ id: string }>(`${GRAPH_ROOT}/sites/${encoded}`, accessToken);
+  const data = await graphRequestJson<{ id: string }>(`${GRAPH_ROOT}/sites/${encoded}`, accessToken);
   if (!data.id) {
     throw new Error('Microsoft Graph: site id not returned');
   }
@@ -194,7 +229,7 @@ export async function resolveGraphListId(
   let nextUrl: string | null = `${GRAPH_ROOT}/sites/${siteId}/lists`;
 
   while (nextUrl) {
-    const page: GraphODataPage<GraphListRef> = await graphFetchJson(nextUrl, accessToken);
+    const page: GraphODataPage<GraphListRef> = await graphRequestJson(nextUrl, accessToken);
     allLists.push(...(page.value || []));
     nextUrl = page['@odata.nextLink'] ?? null;
   }
@@ -219,7 +254,7 @@ async function fetchAllGraphColumns(
   let nextUrl: string | null = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/columns`;
 
   while (nextUrl) {
-    const page: GraphODataPage<GraphColumn> = await graphFetchJson(nextUrl, accessToken);
+    const page: GraphODataPage<GraphColumn> = await graphRequestJson(nextUrl, accessToken);
     all.push(...(page.value || []));
     nextUrl = page['@odata.nextLink'] ?? null;
   }
@@ -253,22 +288,37 @@ function extractChoiceOptionsFromColumns(
   };
 }
 
+function textFromFieldScalar(value: unknown): string {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return '';
+}
+
+function textFromLookupField(value: object): string {
+  if ('LookupValue' in value) {
+    return String((value as { LookupValue?: string }).LookupValue ?? '').trim();
+  }
+  return '';
+}
+
 function fieldText(fields: Record<string, unknown>, key: string | undefined): string {
   if (!key) {
     return '';
   }
-  const v = fields[key];
-  if (v === null || v === undefined) {
+  const value = fields[key];
+  if (value === null || value === undefined) {
     return '';
   }
-  if (typeof v === 'string') {
-    return v.trim();
+  const scalar = textFromFieldScalar(value);
+  if (scalar !== '' || typeof value === 'string') {
+    return scalar;
   }
-  if (typeof v === 'number' || typeof v === 'boolean') {
-    return String(v);
-  }
-  if (typeof v === 'object' && v !== null && 'LookupValue' in v) {
-    return String((v as { LookupValue?: string }).LookupValue ?? '').trim();
+  if (typeof value === 'object') {
+    return textFromLookupField(value);
   }
   return '';
 }
@@ -318,7 +368,7 @@ async function fetchAllGraphListItems(
     `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items?$expand=fields&$top=5000&$orderby=id desc`;
 
   while (nextUrl) {
-    const page: GraphODataPage<GraphListItem> = await graphFetchJson(nextUrl, accessToken);
+    const page: GraphODataPage<GraphListItem> = await graphRequestJson(nextUrl, accessToken);
     all.push(...(page.value || []));
     nextUrl = page['@odata.nextLink'] ?? null;
   }

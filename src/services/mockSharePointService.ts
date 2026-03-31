@@ -1,5 +1,7 @@
 import { Brand, Model, Section, ActivityType, Activity, MachineRecord, KPIData } from '../types';
 
+const LOCALE_SORT = 'es';
+
 // IDs alineados con valores de choice en SharePoint (texto = id, como en buildDictionaryFromRecords).
 const mockBrands: Brand[] = [
   { id: 'CASE', name: 'CASE' },
@@ -101,7 +103,7 @@ class MockSharePointService {
 
   async getSectionOptionsForNewRecord(): Promise<Section[]> {
     await this.delay(300);
-    return [...mockSections].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    return [...mockSections].sort((a, b) => a.name.localeCompare(b.name, LOCALE_SORT));
   }
 
   async getNewRecordEquipmentSelectOptions(): Promise<{
@@ -111,10 +113,10 @@ class MockSharePointService {
   }> {
     await this.delay(300);
     const tipos = Array.from(new Set(mockRecords.map((r) => r.tipoEquipoId).filter(Boolean))).sort((a, b) =>
-      a.localeCompare(b, 'es')
+      a.localeCompare(b, LOCALE_SORT)
     );
-    const marcas = mockBrands.map((b) => b.id).sort((a, b) => a.localeCompare(b, 'es'));
-    const modelos = mockModels.map((m) => m.id).sort((a, b) => a.localeCompare(b, 'es'));
+    const marcas = mockBrands.map((b) => b.id).sort((a, b) => a.localeCompare(b, LOCALE_SORT));
+    const modelos = mockModels.map((m) => m.id).sort((a, b) => a.localeCompare(b, LOCALE_SORT));
     return { tipos, marcas, modelos };
   }
 
@@ -125,7 +127,7 @@ class MockSharePointService {
 
   async getActivityOptionsForNewRecord(): Promise<Activity[]> {
     await this.delay(300);
-    return [...mockActivities].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+    return [...mockActivities].sort((a, b) => a.name.localeCompare(b.name, LOCALE_SORT));
   }
 
   async getActivities(activityTypeId?: string): Promise<Activity[]> {
@@ -135,19 +137,21 @@ class MockSharePointService {
 
   async getRecords(filters?: Partial<MachineRecord>): Promise<MachineRecord[]> {
     await this.delay(500);
-    let filtered = mockRecords;
-
-    if (filters) {
-      Object.entries(filters).forEach(([key, value]) => {
-        if (value) {
-          filtered = filtered.filter(
-            (record) => record[key as keyof MachineRecord] === value
-          );
-        }
-      });
+    if (!filters) {
+      return [...mockRecords];
     }
 
-    return filtered;
+    const entries = Object.entries(filters).filter(
+      ([, value]) => value !== undefined && value !== null && String(value).length > 0
+    ) as Array<[keyof MachineRecord, MachineRecord[keyof MachineRecord]]>;
+
+    if (entries.length === 0) {
+      return [...mockRecords];
+    }
+
+    return mockRecords.filter((record) =>
+      entries.every(([key, value]) => record[key] === value)
+    );
   }
 
   async createRecord(record: Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<MachineRecord> {

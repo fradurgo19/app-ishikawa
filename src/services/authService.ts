@@ -156,6 +156,7 @@ async function acquireGraphAccessToken(): Promise<string | null> {
     });
     return result.accessToken ?? null;
   } catch {
+    /* MSAL: sin caché, consentimiento interactivo requerido u otro error; el caller usa API o Graph más tarde. */
     return null;
   }
 }

@@ -124,6 +124,29 @@ function apiUrl(pathWithQuery: string): string {
   return base ? `${base}${path}` : path;
 }
 
+const ISHIKAWA_RECORDS_PATH = '/api/ishikawa?resource=records';
+
+const RECORD_QUERY_FILTER_KEYS: Array<keyof MachineRecord> = [
+  'tipoEquipoId',
+  'brandId',
+  'modelId',
+  'sectionId',
+  'problem',
+  'activityTypeId',
+  'activityId',
+  'resource',
+  'createdBy',
+];
+
+const MSG_DELEGATED_SIGNIN_REQUIRED =
+  'Inicie sesión con Microsoft para guardar registros. Este entorno usa solo permisos delegados.';
+
+function delegatedGraphCreateErrorMessage(graphError: unknown): string {
+  const detail =
+    graphError instanceof Error ? graphError.message : 'Error desconocido al crear en Graph';
+  return `No se pudo crear el registro con Microsoft Graph (permisos delegados). ${detail}`;
+}
+
 class LiveSharePointService implements SharePointDataService {
   private dictionaryCache: Promise<DictionaryResponse> | null = null;
 
@@ -165,6 +188,47 @@ class LiveSharePointService implements SharePointDataService {
   /**
    * Si el modo Graph aplica y hay token, devuelve diccionario + registros; si no, null (usar /api).
    */
+  private invalidateCaches(): void {
+    this.dictionaryCache = null;
+    this.graphDataLoader = null;
+  }
+
+  /**
+   * Persistencia vía Graph con token delegado. null = usar POST /api/ishikawa.
+   * Lanza si modo delegado-only sin token o si Graph falla y no hay fallback.
+   */
+  private async tryPersistRecordViaMicrosoftGraph(
+    normalized: Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'>
+  ): Promise<MachineRecord | null> {
+    if (!isMicrosoftGraphListMode()) {
+      return null;
+    }
+
+    await authService.initializeAuth();
+    const token = await authService.acquireGraphAccessToken();
+    if (!token) {
+      if (isDelegatedOnlySharePointMode()) {
+        throw new Error(MSG_DELEGATED_SIGNIN_REQUIRED);
+      }
+      return null;
+    }
+
+    try {
+      return await createSharePointListItemViaMicrosoftGraph({
+        siteUrl: graphListEnvSiteUrl(),
+        listName: graphListEnvListName(),
+        fieldMap: getClientFieldMap(),
+        accessToken: token,
+        record: normalized,
+      });
+    } catch (graphError) {
+      if (isDelegatedOnlySharePointMode()) {
+        throw new Error(delegatedGraphCreateErrorMessage(graphError));
+      }
+      return null;
+    }
+  }
+
   private async ensureGraphListData(): Promise<{
     dictionary: DictionaryResponse;
     records: MachineRecord[];
@@ -365,19 +429,7 @@ class LiveSharePointService implements SharePointDataService {
 
     const queryParams = new URLSearchParams({ resource: 'records' });
 
-    const allowedFilterKeys: Array<keyof MachineRecord> = [
-      'tipoEquipoId',
-      'brandId',
-      'modelId',
-      'sectionId',
-      'problem',
-      'activityTypeId',
-      'activityId',
-      'resource',
-      'createdBy',
-    ];
-
-    allowedFilterKeys.forEach((key) => {
+    RECORD_QUERY_FILTER_KEYS.forEach((key) => {
       const rawValue = filters?.[key];
       if (typeof rawValue === 'string' && rawValue.trim()) {
         queryParams.set(key, rawValue.trim());
@@ -390,47 +442,20 @@ class LiveSharePointService implements SharePointDataService {
 
   async createRecord(record: CreateRecordInput): Promise<MachineRecord> {
     const normalized = normalizeCreateRecordInput(record);
-
-    if (isMicrosoftGraphListMode()) {
-      await authService.initializeAuth();
-      const token = await authService.acquireGraphAccessToken();
-      if (token) {
-        try {
-          const created = await createSharePointListItemViaMicrosoftGraph({
-            siteUrl: graphListEnvSiteUrl(),
-            listName: graphListEnvListName(),
-            fieldMap: getClientFieldMap(),
-            accessToken: token,
-            record: normalized,
-          });
-          this.dictionaryCache = null;
-          this.graphDataLoader = null;
-          return normalizeRecord(created);
-        } catch (graphError) {
-          if (isDelegatedOnlySharePointMode()) {
-            const detail =
-              graphError instanceof Error ? graphError.message : 'Error desconocido al crear en Graph';
-            throw new Error(
-              `No se pudo crear el registro con Microsoft Graph (permisos delegados). ${detail}`
-            );
-          }
-        }
-      } else if (isDelegatedOnlySharePointMode()) {
-        throw new Error(
-          'Inicie sesión con Microsoft para guardar registros. Este entorno usa solo permisos delegados.'
-        );
-      }
+    const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized);
+    if (graphRecord) {
+      this.invalidateCaches();
+      return normalizeRecord(graphRecord);
     }
 
     const payload = { record: normalized };
 
-    const response = await requestJson<RecordResponse>(apiUrl('/api/ishikawa?resource=records'), {
+    const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
       method: 'POST',
       body: JSON.stringify(payload),
     });
 
-    this.dictionaryCache = null;
-    this.graphDataLoader = null;
+    this.invalidateCaches();
     return normalizeRecord(response.record);
   }
 
@@ -440,8 +465,7 @@ class LiveSharePointService implements SharePointDataService {
   }
 
   async refreshDictionary(): Promise<void> {
-    this.dictionaryCache = null;
-    this.graphDataLoader = null;
+    this.invalidateCaches();
     await this.getDictionary();
   }
 
