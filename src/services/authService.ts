@@ -1,6 +1,8 @@
 import { PublicClientApplication, type AccountInfo } from '@azure/msal-browser';
 import { isMicrosoftAuthEnabled, loginRequest, msalConfig } from '../config/authConfig';
 
+const GRAPH_SCOPES = loginRequest.scopes;
+
 const MICROSOFT_AUTH_MISCONFIGURED_MESSAGE =
   'Microsoft authentication is not configured. Set VITE_MSAL_CLIENT_ID and VITE_MSAL_TENANT_ID.';
 
@@ -132,6 +134,32 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
+/**
+ * Token para Microsoft Graph (User.Read, Sites.*). Sin sesión MSAL o si falla
+ * acquireTokenSilent, devuelve null (el caller puede usar API serverless).
+ */
+async function acquireGraphAccessToken(): Promise<string | null> {
+  if (!msalInstance) {
+    return null;
+  }
+
+  await initializeAuth();
+  const account = getAccount();
+  if (!account) {
+    return null;
+  }
+
+  try {
+    const result = await msalInstance.acquireTokenSilent({
+      scopes: GRAPH_SCOPES,
+      account,
+    });
+    return result.accessToken ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const authService = {
   initializeAuth,
   getAccount,
@@ -139,4 +167,5 @@ export const authService = {
   login,
   logout,
   isMicrosoftAuthEnabled,
+  acquireGraphAccessToken,
 };

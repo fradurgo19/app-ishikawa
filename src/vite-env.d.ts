@@ -4,6 +4,32 @@ interface ImportMetaEnv {
   readonly VITE_USE_MOCK_DATA?: string;
   /** Origen del API (p. ej. https://xxx.vercel.app). Vacío = mismas rutas relativas /api (producción o proxy Vite). */
   readonly VITE_API_BASE_URL?: string;
+  /**
+   * URL completa del sitio SharePoint (misma idea que SHAREPOINT_SITE_URL en servidor).
+   * Con MSAL + nombre de lista, la app puede leer ítems vía Microsoft Graph en el navegador.
+   */
+  readonly VITE_SHAREPOINT_SITE_URL?: string;
+  /** Nombre o displayName de la lista (prioridad sobre VITE_SHAREPOINT_LIST_TITLE). */
+  readonly VITE_SHAREPOINT_LIST_NAME?: string;
+  /** Alias opcional del nombre de lista (si VITE_SHAREPOINT_LIST_NAME está vacío). */
+  readonly VITE_SHAREPOINT_LIST_TITLE?: string;
+  /** `false` desactiva Graph y usa solo GET /api/ishikawa para diccionario y registros. */
+  readonly VITE_USE_MICROSOFT_GRAPH_LIST?: string;
+  /** Nombres internos de columnas (alinear con Graph fields / lista SharePoint). */
+  readonly VITE_SHAREPOINT_FIELD_TIPO_EQUIPO?: string;
+  readonly VITE_SHAREPOINT_FIELD_BRAND?: string;
+  readonly VITE_SHAREPOINT_FIELD_MODEL?: string;
+  readonly VITE_SHAREPOINT_FIELD_SECTION?: string;
+  readonly VITE_SHAREPOINT_FIELD_PROBLEM?: string;
+  readonly VITE_SHAREPOINT_FIELD_ACTIVITY_TYPE?: string;
+  readonly VITE_SHAREPOINT_FIELD_ACTIVITY?: string;
+  readonly VITE_SHAREPOINT_FIELD_RESOURCE?: string;
+  readonly VITE_SHAREPOINT_FIELD_TIME?: string;
+  readonly VITE_SHAREPOINT_FIELD_CREATED_BY?: string;
+  readonly VITE_SHAREPOINT_FIELD_ATTACHMENT_NAME?: string;
+  readonly VITE_SHAREPOINT_FIELD_ATTACHMENT_URL?: string;
+  readonly VITE_SHAREPOINT_FIELD_ATTACHMENT_TYPE?: string;
+  readonly VITE_SHAREPOINT_FIELD_ATTACHMENT_SIZE?: string;
   readonly VITE_MSAL_CLIENT_ID?: string;
   readonly VITE_MSAL_TENANT_ID?: string;
   readonly VITE_MSAL_REDIRECT_URI?: string;

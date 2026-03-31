@@ -8,6 +8,11 @@ import {
   Model,
   Section,
 } from '../types';
+import { isMicrosoftAuthEnabled } from '../config/authConfig';
+import { getClientFieldMap } from '../config/clientSharePointFieldMap';
+import { filterMachineRecords } from '../utils/filterMachineRecords';
+import { authService } from './authService';
+import { fetchSharePointListViaMicrosoftGraph } from './microsoftGraphListService';
 import { sharePointService as mockSharePointService } from './mockSharePointService';
 
 type CreateRecordInput = Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt' | 'attachment'> & {
@@ -69,6 +74,37 @@ interface SharePointDataService {
 
 const USE_MOCK_DATA = import.meta.env.VITE_USE_MOCK_DATA === 'true';
 
+function graphListEnvSiteUrl(): string {
+  return normalizeViteEnvString(import.meta.env.VITE_SHAREPOINT_SITE_URL);
+}
+
+function graphListEnvListName(): string {
+  return (
+    normalizeViteEnvString(import.meta.env.VITE_SHAREPOINT_LIST_NAME) ||
+    normalizeViteEnvString(import.meta.env.VITE_SHAREPOINT_LIST_TITLE)
+  );
+}
+
+function normalizeViteEnvString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * Lista vía Graph en el navegador si MSAL + URL de sitio + nombre de lista están configurados.
+ * `VITE_USE_MICROSOFT_GRAPH_LIST=false` fuerza solo API /api/ishikawa.
+ */
+function isMicrosoftGraphListMode(): boolean {
+  if (import.meta.env.VITE_USE_MICROSOFT_GRAPH_LIST === 'false') {
+    return false;
+  }
+  if (!isMicrosoftAuthEnabled) {
+    return false;
+  }
+  const siteUrl = graphListEnvSiteUrl();
+  const listName = graphListEnvListName();
+  return Boolean(siteUrl && listName);
+}
+
 /** Origen absoluto del API (producción mismo sitio: vacío). En dev con Vite, suele bastar el proxy /api. */
 function apiUrl(pathWithQuery: string): string {
   const raw = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? '';
@@ -79,6 +115,70 @@ function apiUrl(pathWithQuery: string): string {
 
 class LiveSharePointService implements SharePointDataService {
   private dictionaryCache: Promise<DictionaryResponse> | null = null;
+
+  /** Datos de lista cargados con Microsoft Graph (diccionario + registros en una sola carga). */
+  private graphDataLoader: Promise<{ dictionary: DictionaryResponse; records: MachineRecord[] }> | null =
+    null;
+
+  private async loadSharePointListFromGraph(accessToken: string): Promise<{
+    dictionary: DictionaryResponse;
+    records: MachineRecord[];
+  }> {
+    const siteUrl = graphListEnvSiteUrl();
+    const listName = graphListEnvListName();
+
+    const bundle = await fetchSharePointListViaMicrosoftGraph({
+      siteUrl,
+      listName,
+      fieldMap: getClientFieldMap(),
+      accessToken: accessToken,
+    });
+
+    const dictionary: DictionaryResponse = {
+      tiposEquipo: bundle.dictionary.tiposEquipo,
+      brands: bundle.dictionary.brands,
+      models: bundle.dictionary.models,
+      sections: bundle.dictionary.sections,
+      activityTypes: bundle.dictionary.activityTypes,
+      activities: bundle.dictionary.activities,
+      kpis: bundle.dictionary.kpis,
+      fieldChoiceOptions: bundle.dictionary.fieldChoiceOptions,
+    };
+
+    return {
+      dictionary,
+      records: bundle.records.map((r) => normalizeRecord(r)),
+    };
+  }
+
+  /**
+   * Si el modo Graph aplica y hay token, devuelve diccionario + registros; si no, null (usar /api).
+   */
+  private async ensureGraphListData(): Promise<{
+    dictionary: DictionaryResponse;
+    records: MachineRecord[];
+  } | null> {
+    if (!isMicrosoftGraphListMode()) {
+      return null;
+    }
+
+    await authService.initializeAuth();
+    const token = await authService.acquireGraphAccessToken();
+    if (!token) {
+      return null;
+    }
+
+    if (this.graphDataLoader === null) {
+      this.graphDataLoader = this.loadSharePointListFromGraph(token);
+    }
+
+    try {
+      return await this.graphDataLoader;
+    } catch {
+      this.graphDataLoader = null;
+      return null;
+    }
+  }
 
   async getBrands(): Promise<Brand[]> {
     const dictionary = await this.getDictionary();
@@ -247,6 +347,11 @@ class LiveSharePointService implements SharePointDataService {
   }
 
   async getRecords(filters?: Partial<MachineRecord>): Promise<MachineRecord[]> {
+    const graphData = await this.ensureGraphListData();
+    if (graphData) {
+      return filterMachineRecords(graphData.records, filters ?? {});
+    }
+
     const queryParams = new URLSearchParams({ resource: 'records' });
 
     const allowedFilterKeys: Array<keyof MachineRecord> = [
@@ -283,6 +388,7 @@ class LiveSharePointService implements SharePointDataService {
     });
 
     this.dictionaryCache = null;
+    this.graphDataLoader = null;
     return normalizeRecord(response.record);
   }
 
@@ -293,10 +399,16 @@ class LiveSharePointService implements SharePointDataService {
 
   async refreshDictionary(): Promise<void> {
     this.dictionaryCache = null;
+    this.graphDataLoader = null;
     await this.getDictionary();
   }
 
   private async getDictionary(): Promise<DictionaryResponse> {
+    const graphData = await this.ensureGraphListData();
+    if (graphData) {
+      return graphData.dictionary;
+    }
+
     this.dictionaryCache ??= requestJson<DictionaryResponse>(apiUrl('/api/ishikawa?resource=dictionary'));
 
     try {
