@@ -77,6 +77,7 @@ export default async function handler(req, res) {
           ),
         };
       }
+      setDictionaryDiagnosticHeaders(res, records, dictionary);
       sendJson(res, 200, dictionary);
       return;
     }
@@ -85,6 +86,7 @@ export default async function handler(req, res) {
       const records = await safeLoadMappedRecords(sharePointConfigResolved);
       const filters = extractRecordFilters(req.query);
       const filteredRecords = filterRecords(records, filters);
+      setRecordsListDiagnosticHeaders(res, records, filteredRecords);
       sendJson(res, 200, { records: filteredRecords });
       return;
     }
@@ -196,6 +198,25 @@ function getQueryValue(value) {
 function setJsonHeaders(res) {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
+}
+
+/**
+ * Cabeceras sin datos sensibles: visibles en producción (Vercel) desde DevTools → Red → ishikawa.
+ * Si SharePoint-Items es 0 pero hay ítems en la lista, revisar permisos OData, variables de entorno y logs de función.
+ */
+function setDictionaryDiagnosticHeaders(res, sharePointRecords, dictionary) {
+  const fco = dictionary.fieldChoiceOptions;
+  res.setHeader('X-Ishikawa-SharePoint-Items', String(sharePointRecords.length));
+  res.setHeader('X-Ishikawa-Dictionary-Brands', String(dictionary.brands?.length ?? 0));
+  res.setHeader(
+    'X-Ishikawa-Fco-Section-Count',
+    String(Array.isArray(fco?.section) ? fco.section.length : 0)
+  );
+}
+
+function setRecordsListDiagnosticHeaders(res, allRecords, returnedRecords) {
+  res.setHeader('X-Ishikawa-SharePoint-Items', String(allRecords.length));
+  res.setHeader('X-Ishikawa-Records-Returned', String(returnedRecords.length));
 }
 
 function sendJson(res, statusCode, payload) {
