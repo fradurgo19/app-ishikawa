@@ -1,3 +1,5 @@
+import type { Attachment } from '../types';
+
 /**
  * Adjuntos nativos de lista vía SharePoint REST (mismo patrón que la app Equipo: token delegado del sitio,
  * no el cuerpo JSON del ítem). POST .../AttachmentFiles/add con application/octet-stream.
@@ -107,4 +109,86 @@ export async function uploadListItemAttachmentRest(options: {
       `No se pudo subir "${file.name}": HTTP ${response.status} ${JSON.stringify(errBody).slice(0, 280)}`
     );
   }
+}
+
+interface RestAttachmentFileRow {
+  FileName?: string;
+  ServerRelativeUrl?: string;
+  Length?: number;
+}
+
+function toAbsoluteSharePointFileUrl(serverRelativeUrl: string, siteUrl: string): string {
+  const relative = (serverRelativeUrl ?? '').trim();
+  if (!relative) {
+    return '';
+  }
+  if (relative.startsWith('http://') || relative.startsWith('https://')) {
+    return relative;
+  }
+  try {
+    const origin = new URL(siteUrl.replace(/\/$/, '')).origin;
+    const path = relative.startsWith('/') ? relative : `/${relative}`;
+    return `${origin}${path}`;
+  } catch {
+    return relative;
+  }
+}
+
+function extractRestAttachmentFileRows(payload: Record<string, unknown>): RestAttachmentFileRow[] {
+  const d = payload.d as Record<string, unknown> | undefined;
+  const fromD = d?.results;
+  if (Array.isArray(fromD)) {
+    return fromD as RestAttachmentFileRow[];
+  }
+  const value = payload.value;
+  if (Array.isArray(value)) {
+    return value as RestAttachmentFileRow[];
+  }
+  return [];
+}
+
+/**
+ * Lista archivos de la columna nativa Attachments del ítem (GET SharePoint REST).
+ * Devuelve URLs absolutas listas para abrir en el navegador (sesión Microsoft).
+ */
+export async function fetchListItemAttachmentFilesRest(options: {
+  siteUrl: string;
+  listTitle: string;
+  itemId: string;
+  accessToken: string;
+}): Promise<Attachment[]> {
+  const { siteUrl, listTitle, itemId, accessToken } = options;
+  const base = siteUrl.replace(/\/$/, '');
+  const id = Number.parseInt(itemId, 10);
+  if (!Number.isInteger(id) || id < 1) {
+    return [];
+  }
+  const safeTitle = escapeODataStringLiteral(listTitle.trim());
+  const url = `${base}/_api/web/lists/GetByTitle('${safeTitle}')/items(${id})/AttachmentFiles`;
+
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json;odata=verbose',
+    },
+  });
+
+  if (!response.ok) {
+    return [];
+  }
+
+  const payload = await parseJsonSafe(response);
+  const rows = extractRestAttachmentFileRows(payload);
+
+  return rows.map((row, index) => {
+    const fileName = (row.FileName ?? 'Adjunto').trim() || 'Adjunto';
+    const serverRelative = (row.ServerRelativeUrl ?? '').trim();
+    return {
+      id: `attachment-${itemId}-${index}-${fileName}`,
+      name: fileName,
+      url: toAbsoluteSharePointFileUrl(serverRelative, base),
+      type: 'application/octet-stream',
+      size: Number(row.Length) || 0,
+    };
+  });
 }

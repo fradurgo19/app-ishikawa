@@ -1,5 +1,6 @@
 import type { ClientFieldMap } from '../config/clientSharePointFieldMap';
 import type { Attachment, MachineRecord } from '../types';
+import { fetchListItemAttachmentFilesRest } from './sharePointRestAttachments';
 import {
   buildDictionaryFromRecords,
   mergeFieldChoiceOptionsFromRecordsAndDictionary,
@@ -172,6 +173,7 @@ export function buildGraphListItemFields(
 }
 
 const GRAPH_ATTACHMENT_FETCH_CHUNK = 8;
+const REST_ATTACHMENT_ENRICH_CHUNK = 6;
 
 interface GraphAttachmentApiRow {
   id?: string;
@@ -180,29 +182,95 @@ interface GraphAttachmentApiRow {
   contentType?: string;
 }
 
+interface GraphAttachmentsODataPage {
+  value?: GraphAttachmentApiRow[];
+  '@odata.nextLink'?: string;
+}
+
+/** Contexto para armar URL clásica de adjunto de lista (Graph no devuelve enlace descargable). */
+interface ListAttachmentUrlContext {
+  siteUrl: string;
+  listTitle: string;
+}
+
+function buildSharePointClassicListAttachmentFileUrl(
+  siteUrlRaw: string,
+  listTitle: string,
+  itemId: string,
+  fileName: string
+): string {
+  const siteUrl = siteUrlRaw.replace(/\/+$/, '');
+  const title = listTitle.trim();
+  const idPart = String(itemId).trim();
+  const namePart = (fileName || 'Adjunto').trim() || 'Adjunto';
+  if (!siteUrl || !title || !idPart) {
+    return '';
+  }
+  return `${siteUrl}/Lists/${encodeURIComponent(title)}/Attachments/${encodeURIComponent(idPart)}/${encodeURIComponent(namePart)}`;
+}
+
+function graphItemFieldsIndicateAttachments(item: GraphListItem): boolean {
+  const raw = item.fields?.Attachments ?? item.fields?.attachments;
+  if (raw === true || raw === 1) {
+    return true;
+  }
+  if (typeof raw === 'string' && raw.toLowerCase() === 'yes') {
+    return true;
+  }
+  return false;
+}
+
+function mapGraphAttachmentRowsToAttachments(
+  rows: GraphAttachmentApiRow[],
+  itemId: string,
+  urlContext?: ListAttachmentUrlContext
+): Attachment[] {
+  return rows.map((row, idx) => {
+    const name = (row.name ?? 'Adjunto').trim() || 'Adjunto';
+    const builtUrl =
+      urlContext?.siteUrl && urlContext?.listTitle
+        ? buildSharePointClassicListAttachmentFileUrl(urlContext.siteUrl, urlContext.listTitle, itemId, name)
+        : '';
+    return {
+      id: String(row.id ?? `att-${itemId}-${idx}`),
+      name,
+      url: builtUrl,
+      type: (row.contentType ?? 'application/octet-stream').trim() || 'application/octet-stream',
+      size: Number(row.size) || 0,
+    };
+  });
+}
+
 async function fetchGraphListItemAttachments(
   siteId: string,
   listId: string,
   itemId: string,
-  accessToken: string
+  accessToken: string,
+  urlContext?: ListAttachmentUrlContext
 ): Promise<Attachment[]> {
-  const url = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}/attachments`;
-  const data = await graphRequestJson<{ value?: GraphAttachmentApiRow[] }>(url, accessToken);
-  const rows = data.value || [];
-  return rows.map((row, idx) => ({
-    id: String(row.id ?? `att-${itemId}-${idx}`),
-    name: row.name || 'Adjunto',
-    url: '',
-    type: row.contentType || 'application/octet-stream',
-    size: Number(row.size) || 0,
-  }));
+  const rows: GraphAttachmentApiRow[] = [];
+  let nextUrl: string | null =
+    `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}/attachments`;
+
+  while (nextUrl) {
+    const pageUrl = nextUrl;
+    const data: GraphAttachmentsODataPage = await graphRequestJson<GraphAttachmentsODataPage>(
+      pageUrl,
+      accessToken
+    );
+    rows.push(...(data.value || []));
+    nextUrl = data['@odata.nextLink'] ?? null;
+  }
+
+  return mapGraphAttachmentRowsToAttachments(rows, itemId, urlContext);
 }
 
 async function buildGraphNativeAttachmentMap(
   siteId: string,
   listId: string,
   itemIds: string[],
-  accessToken: string
+  accessToken: string,
+  urlContext?: ListAttachmentUrlContext
 ): Promise<Map<string, Attachment[]>> {
   const map = new Map<string, Attachment[]>();
   for (let i = 0; i < itemIds.length; i += GRAPH_ATTACHMENT_FETCH_CHUNK) {
@@ -210,17 +278,60 @@ async function buildGraphNativeAttachmentMap(
     await Promise.all(
       slice.map(async (id) => {
         try {
-          const list = await fetchGraphListItemAttachments(siteId, listId, id, accessToken);
+          const list = await fetchGraphListItemAttachments(siteId, listId, id, accessToken, urlContext);
           if (list.length > 0) {
             map.set(id, list);
           }
         } catch {
-          /* Algunos tenants o listas no exponen adjuntos vía Graph; se ignora. */
+          /* Algunos tenants o listas no exponen adjuntos vía Graph; se intenta REST después. */
         }
       })
     );
   }
   return map;
+}
+
+async function enrichAttachmentMapWithSharePointRest(options: {
+  siteUrl: string;
+  listTitle: string;
+  items: GraphListItem[];
+  attachmentMap: Map<string, Attachment[]>;
+  sharePointAccessToken: string;
+}): Promise<void> {
+  const { siteUrl, listTitle, items, attachmentMap, sharePointAccessToken } = options;
+  const pending = items.filter((it) => {
+    if (!graphItemFieldsIndicateAttachments(it)) {
+      return false;
+    }
+    const id = String(it.id);
+    const existing = attachmentMap.get(id);
+    if (!existing?.length) {
+      return true;
+    }
+    return existing.every((a) => !(a.url ?? '').trim());
+  });
+
+  for (let i = 0; i < pending.length; i += REST_ATTACHMENT_ENRICH_CHUNK) {
+    const slice = pending.slice(i, i + REST_ATTACHMENT_ENRICH_CHUNK);
+    await Promise.all(
+      slice.map(async (it) => {
+        const id = String(it.id);
+        try {
+          const list = await fetchListItemAttachmentFilesRest({
+            siteUrl,
+            listTitle,
+            itemId: id,
+            accessToken: sharePointAccessToken,
+          });
+          if (list.length > 0) {
+            attachmentMap.set(id, list);
+          }
+        } catch {
+          /* Sin permisos REST o lista no compatible: se deja sin adjuntos en cliente. */
+        }
+      })
+    );
+  }
 }
 
 export async function createSharePointListItemViaMicrosoftGraph(options: {
@@ -248,9 +359,15 @@ export async function createSharePointListItemViaMicrosoftGraph(options: {
     `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${itemId}?$expand=fields`,
     accessToken
   );
-  const nativeList = await fetchGraphListItemAttachments(siteId, listId, itemId, accessToken).catch(
-    () => [] as Attachment[]
-  );
+  const urlCtx: ListAttachmentUrlContext = { siteUrl, listTitle: listName };
+  const nativeList = await fetchGraphListItemAttachments(
+    siteId,
+    listId,
+    itemId,
+    accessToken,
+    urlCtx
+  ).catch(() => [] as Attachment[]);
+
   return mapGraphListItemToMachineRecord(expanded, fieldMap, nativeList);
 }
 
@@ -261,8 +378,10 @@ export async function loadGraphListItemAsMachineRecord(options: {
   fieldMap: ClientFieldMap;
   accessToken: string;
   itemId: string;
+  /** Si Graph no devuelve adjuntos, se rellenan con GET AttachmentFiles (mismo token que la subida). */
+  sharePointAccessToken?: string | null;
 }): Promise<MachineRecord> {
-  const { siteUrl, listName, fieldMap, accessToken, itemId } = options;
+  const { siteUrl, listName, fieldMap, accessToken, itemId, sharePointAccessToken } = options;
   const siteId = await resolveGraphSiteId(siteUrl, accessToken);
   const listId = await resolveGraphListId(siteId, listName, accessToken);
   const encodedId = encodeURIComponent(itemId);
@@ -270,9 +389,31 @@ export async function loadGraphListItemAsMachineRecord(options: {
     `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${encodedId}?$expand=fields`,
     accessToken
   );
-  const nativeList = await fetchGraphListItemAttachments(siteId, listId, itemId, accessToken).catch(
-    () => [] as Attachment[]
-  );
+  const urlCtx: ListAttachmentUrlContext = { siteUrl, listTitle: listName };
+  let nativeList = await fetchGraphListItemAttachments(
+    siteId,
+    listId,
+    itemId,
+    accessToken,
+    urlCtx
+  ).catch(() => [] as Attachment[]);
+
+  if (
+    nativeList.length === 0 &&
+    sharePointAccessToken &&
+    graphItemFieldsIndicateAttachments(expanded)
+  ) {
+    const fromRest = await fetchListItemAttachmentFilesRest({
+      siteUrl,
+      listTitle: listName,
+      itemId,
+      accessToken: sharePointAccessToken,
+    }).catch(() => [] as Attachment[]);
+    if (fromRest.length > 0) {
+      nativeList = fromRest;
+    }
+  }
+
   return mapGraphListItemToMachineRecord(expanded, fieldMap, nativeList);
 }
 
@@ -488,8 +629,10 @@ export async function fetchSharePointListViaMicrosoftGraph(options: {
   listName: string;
   fieldMap: ClientFieldMap;
   accessToken: string;
+  /** Token del sitio SharePoint (.default); rellena adjuntos cuando Graph no los enumera (misma app que la subida REST). */
+  sharePointAccessToken?: string | null;
 }): Promise<GraphListBundle> {
-  const { siteUrl, listName, fieldMap, accessToken } = options;
+  const { siteUrl, listName, fieldMap, accessToken, sharePointAccessToken } = options;
 
   const siteId = await resolveGraphSiteId(siteUrl, accessToken);
   const listId = await resolveGraphListId(siteId, listName, accessToken);
@@ -500,7 +643,24 @@ export async function fetchSharePointListViaMicrosoftGraph(options: {
   ]);
 
   const itemIds = items.map((it) => String(it.id));
-  const attachmentMap = await buildGraphNativeAttachmentMap(siteId, listId, itemIds, accessToken);
+  const urlCtx: ListAttachmentUrlContext = { siteUrl, listTitle: listName };
+  const attachmentMap = await buildGraphNativeAttachmentMap(
+    siteId,
+    listId,
+    itemIds,
+    accessToken,
+    urlCtx
+  );
+
+  if (sharePointAccessToken) {
+    await enrichAttachmentMapWithSharePointRest({
+      siteUrl,
+      listTitle: listName,
+      items,
+      attachmentMap,
+      sharePointAccessToken,
+    });
+  }
 
   const records = items.map((item) => {
     const id = String(item.id);

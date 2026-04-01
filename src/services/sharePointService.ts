@@ -238,11 +238,20 @@ class LiveSharePointService implements SharePointDataService {
     dictionary: DictionaryResponse;
     records: MachineRecord[];
   }> {
+    let sharePointAccessToken: string | null = null;
+    try {
+      await authService.initializeAuth();
+      sharePointAccessToken = await authService.acquireSharePointAccessToken(ctx.siteUrl);
+    } catch {
+      sharePointAccessToken = null;
+    }
+
     const bundle = await fetchSharePointListViaMicrosoftGraph({
       siteUrl: ctx.siteUrl,
       listName: ctx.listName,
       fieldMap: getClientFieldMap(),
       accessToken: accessToken,
+      sharePointAccessToken,
     });
 
     const dictionary: DictionaryResponse = {
@@ -601,6 +610,7 @@ class LiveSharePointService implements SharePointDataService {
           fieldMap: getClientFieldMap(),
           accessToken: graphAccess,
           itemId: created.id,
+          sharePointAccessToken: sharePointRestToken,
         });
         return normalizeRecord(refreshed);
       } catch {
