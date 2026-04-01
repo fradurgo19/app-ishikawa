@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
   ActivityType,
@@ -101,37 +102,6 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
     return colors[type];
   };
 
-  const renderNode = (node: FishboneNode, level = 0) => {
-    const hasChildren = node.children.length > 0;
-    const Icon = getNodeIcon(node.type);
-    
-    return (
-      <div key={node.id} style={{ marginLeft: `${level}rem` }}>
-        <div className="flex items-center mb-2">
-          <button
-            onClick={() => hasChildren && toggleNode(node.id)}
-            className={`flex items-center gap-2 p-2 rounded-lg border-2 transition-all duration-200 ${getNodeColor(node.type)} ${
-              hasChildren ? 'hover:shadow-md cursor-pointer' : ''
-            }`}
-            disabled={!hasChildren}
-          >
-            {hasChildren && (
-              node.expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />
-            )}
-            {Icon && <Icon size={16} />}
-            <span className="font-medium">{node.label}</span>
-          </button>
-        </div>
-        
-        {node.expanded && node.children.length > 0 && (
-          <div className="ml-6 border-l-2 border-gray-200 pl-4">
-            {node.children.map(child => renderNode(child, level + 1))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -142,10 +112,45 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
 
   return (
     <div className="bg-white rounded-lg p-6 shadow-md">
-      <h2 className="text-2xl font-bold text-gray-900 mb-6">Diagrama Ishikawa</h2>
-      <div className="space-y-4">
+      <h2 className="text-2xl font-bold text-gray-900 mb-4">Diagrama Ishikawa</h2>
+      <p className="text-sm text-gray-600 mb-6">
+        Espina horizontal: las causas se abren hacia arriba y hacia abajo, en alternancia.
+      </p>
+      <div className="overflow-x-auto overflow-y-visible pb-8 pt-4">
         {fishboneData.length > 0 ? (
-          fishboneData.map(node => renderNode(node))
+          <div className="flex flex-row items-center justify-start min-w-min gap-0 px-2">
+            {fishboneData.map((node, index) => (
+              <React.Fragment key={node.id}>
+                {index > 0 && (
+                  <div
+                    className="h-1 w-10 sm:w-14 shrink-0 bg-gray-400 rounded-full self-center"
+                    aria-hidden
+                  />
+                )}
+                <div className="shrink-0 flex flex-col items-center">
+                  <FishboneBranch
+                    node={node}
+                    onToggle={toggleNode}
+                    getNodeColor={getNodeColor}
+                    getNodeIcon={getNodeIcon}
+                  />
+                </div>
+              </React.Fragment>
+            ))}
+            <div
+              className="h-1 w-10 sm:w-14 shrink-0 self-center bg-gray-400 rounded-full"
+              aria-hidden
+            />
+            <div
+              className="flex shrink-0 items-center gap-2 rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-900"
+              title="Efecto / foco del análisis"
+            >
+              <span className="hidden sm:inline">Efecto</span>
+              <span className="max-w-[140px] truncate sm:max-w-[200px]">
+                {selectedProblem || 'Análisis'}
+              </span>
+            </div>
+          </div>
         ) : (
           <p className="text-gray-500 text-center py-8">
             No hay datos disponibles para los criterios seleccionados
@@ -155,6 +160,160 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
     </div>
   );
 };
+
+function splitChildrenIntoUpperAndLowerRibs(children: FishboneNode[]): {
+  upper: FishboneNode[];
+  lower: FishboneNode[];
+} {
+  const upper: FishboneNode[] = [];
+  const lower: FishboneNode[] = [];
+  children.forEach((child, index) => {
+    if (index % 2 === 0) {
+      upper.push(child);
+    } else {
+      lower.push(child);
+    }
+  });
+  return { upper, lower };
+}
+
+interface FishboneBranchProps {
+  node: FishboneNode;
+  onToggle: (nodeId: string) => void;
+  getNodeColor: (type: FishboneNode['type']) => string;
+  getNodeIcon: (type: FishboneNode['type']) => LucideIcon | null;
+}
+
+function FishboneRibConnector(): React.ReactElement {
+  return <div className="h-10 w-px shrink-0 bg-gray-400" aria-hidden />;
+}
+
+interface FishboneRibColumnProps {
+  child: FishboneNode;
+  placement: 'upper' | 'lower';
+  onToggle: (nodeId: string) => void;
+  getNodeColor: (type: FishboneNode['type']) => string;
+  getNodeIcon: (type: FishboneNode['type']) => LucideIcon | null;
+}
+
+function FishboneRibColumn({
+  child,
+  placement,
+  onToggle,
+  getNodeColor,
+  getNodeIcon,
+}: FishboneRibColumnProps) {
+  const branch = (
+    <div className="max-w-[220px]">
+      <FishboneBranch
+        node={child}
+        onToggle={onToggle}
+        getNodeColor={getNodeColor}
+        getNodeIcon={getNodeIcon}
+      />
+    </div>
+  );
+  const connector = <FishboneRibConnector />;
+
+  return (
+    <div className="flex flex-col items-center">
+      {placement === 'upper' ? (
+        <>
+          {branch}
+          {connector}
+        </>
+      ) : (
+        <>
+          {connector}
+          {branch}
+        </>
+      )}
+    </div>
+  );
+}
+
+function FishboneBranch({ node, onToggle, getNodeColor, getNodeIcon }: FishboneBranchProps) {
+  const hasChildren = node.children.length > 0;
+  const { upper, lower } = splitChildrenIntoUpperAndLowerRibs(node.children);
+  const Icon = getNodeIcon(node.type);
+
+  return (
+    <div className="flex flex-col items-center">
+      {node.expanded && upper.length > 0 && (
+        <div className="mb-0 flex flex-row flex-wrap items-end justify-center gap-x-8 gap-y-4">
+          {upper.map((child) => (
+            <FishboneRibColumn
+              key={child.id}
+              child={child}
+              placement="upper"
+              onToggle={onToggle}
+              getNodeColor={getNodeColor}
+              getNodeIcon={getNodeIcon}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="relative z-10 flex flex-row items-center">
+        <FishboneNodeButton
+          node={node}
+          hasChildren={hasChildren}
+          Icon={Icon}
+          className={getNodeColor(node.type)}
+          onToggle={() => hasChildren && onToggle(node.id)}
+        />
+      </div>
+
+      {node.expanded && lower.length > 0 && (
+        <div className="mt-0 flex flex-row flex-wrap items-start justify-center gap-x-8 gap-y-4">
+          {lower.map((child) => (
+            <FishboneRibColumn
+              key={child.id}
+              child={child}
+              placement="lower"
+              onToggle={onToggle}
+              getNodeColor={getNodeColor}
+              getNodeIcon={getNodeIcon}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface FishboneNodeButtonProps {
+  node: FishboneNode;
+  hasChildren: boolean;
+  Icon: LucideIcon | null;
+  className: string;
+  onToggle: () => void;
+}
+
+function FishboneNodeButton({
+  node,
+  hasChildren,
+  Icon,
+  className,
+  onToggle,
+}: FishboneNodeButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={hasChildren ? node.expanded : undefined}
+      className={`flex max-w-[240px] items-center gap-2 rounded-lg border-2 px-3 py-2 text-left text-sm transition-all duration-200 ${className} ${
+        hasChildren ? 'cursor-pointer hover:shadow-md' : 'cursor-default opacity-95'
+      }`}
+      disabled={!hasChildren}
+    >
+      {hasChildren &&
+        (node.expanded ? <ChevronDown size={16} className="shrink-0" /> : <ChevronRight size={16} className="shrink-0" />)}
+      {Icon && <Icon size={16} className="shrink-0" />}
+      <span className="font-medium break-words">{node.label}</span>
+    </button>
+  );
+}
 
 interface FishboneDataBundle {
   brands: Brand[];
