@@ -93,22 +93,6 @@ function normalizeViteEnvString(value: unknown): string {
 }
 
 /**
- * Lista vía Graph en el navegador si MSAL + URL de sitio + nombre de lista están configurados.
- * `VITE_USE_MICROSOFT_GRAPH_LIST=false` fuerza solo API /api/ishikawa.
- */
-function isMicrosoftGraphListMode(): boolean {
-  if (import.meta.env.VITE_USE_MICROSOFT_GRAPH_LIST === 'false') {
-    return false;
-  }
-  if (!isMicrosoftAuthEnabled) {
-    return false;
-  }
-  const siteUrl = graphListEnvSiteUrl();
-  const listName = graphListEnvListName();
-  return Boolean(siteUrl && listName);
-}
-
-/**
  * Sin credenciales de aplicación en servidor: crear/leer lista solo con token delegado (MSAL).
  * Si falla Graph, no se reintenta POST /api/ishikawa; si no hay sesión, crear falla con mensaje claro.
  */
@@ -122,6 +106,78 @@ function apiUrl(pathWithQuery: string): string {
   const base = raw.replace(/\/$/, '');
   const path = pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`;
   return base ? `${base}${path}` : path;
+}
+
+function isMicrosoftGraphListExplicitlyDisabled(): boolean {
+  return import.meta.env.VITE_USE_MICROSOFT_GRAPH_LIST === 'false';
+}
+
+interface GraphListContext {
+  siteUrl: string;
+  listName: string;
+}
+
+interface PublicSharePointConfigShape {
+  siteUrl: string;
+  listTitle: string;
+}
+
+let publicSharePointConfigPromise: Promise<PublicSharePointConfigShape> | null = null;
+
+async function loadPublicSharePointConfig(): Promise<PublicSharePointConfigShape> {
+  try {
+    const response = await fetch(apiUrl('/api/sharepoint-public-config'));
+    if (!response.ok) {
+      return { siteUrl: '', listTitle: '' };
+    }
+    const data = (await response.json()) as { siteUrl?: unknown; listTitle?: unknown };
+    return {
+      siteUrl: typeof data.siteUrl === 'string' ? data.siteUrl.trim() : '',
+      listTitle: typeof data.listTitle === 'string' ? data.listTitle.trim() : '',
+    };
+  } catch {
+    return { siteUrl: '', listTitle: '' };
+  }
+}
+
+function getPublicSharePointConfig(): Promise<PublicSharePointConfigShape> {
+  publicSharePointConfigPromise ??= loadPublicSharePointConfig();
+  return publicSharePointConfigPromise;
+}
+
+/**
+ * Contexto para Graph: VITE_SHAREPOINT_* en build, o respaldo desde /api/sharepoint-public-config
+ * (lee SHAREPOINT_SITE_URL + SHAREPOINT_LIST_TITLE del servidor sin secretos).
+ * Así el mismo despliegue en Vercel sirve para API serverless y para lectura delegada en el navegador.
+ */
+async function resolveGraphListContext(): Promise<GraphListContext | null> {
+  if (isMicrosoftGraphListExplicitlyDisabled()) {
+    return null;
+  }
+  if (!isMicrosoftAuthEnabled) {
+    return null;
+  }
+
+  const viteSite = graphListEnvSiteUrl();
+  const viteList = graphListEnvListName();
+  let siteUrl = viteSite;
+  let listName = viteList;
+
+  if (!siteUrl || !listName) {
+    const pub = await getPublicSharePointConfig();
+    if (!siteUrl) {
+      siteUrl = pub.siteUrl;
+    }
+    if (!listName) {
+      listName = pub.listTitle;
+    }
+  }
+
+  if (!siteUrl || !listName) {
+    return null;
+  }
+
+  return { siteUrl, listName };
 }
 
 const ISHIKAWA_RECORDS_PATH = '/api/ishikawa?resource=records';
@@ -154,16 +210,16 @@ class LiveSharePointService implements SharePointDataService {
   private graphDataLoader: Promise<{ dictionary: DictionaryResponse; records: MachineRecord[] }> | null =
     null;
 
-  private async loadSharePointListFromGraph(accessToken: string): Promise<{
+  private async loadSharePointListFromGraph(
+    accessToken: string,
+    ctx: GraphListContext
+  ): Promise<{
     dictionary: DictionaryResponse;
     records: MachineRecord[];
   }> {
-    const siteUrl = graphListEnvSiteUrl();
-    const listName = graphListEnvListName();
-
     const bundle = await fetchSharePointListViaMicrosoftGraph({
-      siteUrl,
-      listName,
+      siteUrl: ctx.siteUrl,
+      listName: ctx.listName,
       fieldMap: getClientFieldMap(),
       accessToken: accessToken,
     });
@@ -200,11 +256,13 @@ class LiveSharePointService implements SharePointDataService {
   private async tryPersistRecordViaMicrosoftGraph(
     normalized: Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'>
   ): Promise<MachineRecord | null> {
-    if (!isMicrosoftGraphListMode()) {
+    const ctx = await resolveGraphListContext();
+    if (!ctx) {
       return null;
     }
 
     await authService.initializeAuth();
+    await authService.getAccountWithRetry();
     const token = await authService.acquireGraphAccessToken();
     if (!token) {
       if (isDelegatedOnlySharePointMode()) {
@@ -215,8 +273,8 @@ class LiveSharePointService implements SharePointDataService {
 
     try {
       return await createSharePointListItemViaMicrosoftGraph({
-        siteUrl: graphListEnvSiteUrl(),
-        listName: graphListEnvListName(),
+        siteUrl: ctx.siteUrl,
+        listName: ctx.listName,
         fieldMap: getClientFieldMap(),
         accessToken: token,
         record: normalized,
@@ -233,18 +291,20 @@ class LiveSharePointService implements SharePointDataService {
     dictionary: DictionaryResponse;
     records: MachineRecord[];
   } | null> {
-    if (!isMicrosoftGraphListMode()) {
+    const ctx = await resolveGraphListContext();
+    if (!ctx) {
       return null;
     }
 
     await authService.initializeAuth();
+    await authService.getAccountWithRetry();
     const token = await authService.acquireGraphAccessToken();
     if (!token) {
       return null;
     }
 
     if (this.graphDataLoader === null) {
-      this.graphDataLoader = this.loadSharePointListFromGraph(token);
+      this.graphDataLoader = this.loadSharePointListFromGraph(token, ctx);
     }
 
     try {
