@@ -54,7 +54,8 @@ const StagedAttachmentRow: React.FC<StagedAttachmentRowProps> = ({ file, index, 
 
 interface NewRecordAttachmentsFieldProps {
   stagedFiles: File[];
-  onAppendFiles: (files: FileList | null) => void;
+  /** Copiar a array antes de vaciar el input: FileList es vivo y se vacía al resetear value. */
+  onAppendFiles: (picked: File[]) => void;
   onRemoveAt: (index: number) => void;
 }
 
@@ -67,8 +68,28 @@ const NewRecordAttachmentsField: React.FC<NewRecordAttachmentsFieldProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onAppendFiles(e.target.files);
-    e.target.value = '';
+    const input = e.target;
+    const list = input.files;
+    const picked = list && list.length > 0 ? Array.from(list) : [];
+    input.value = '';
+    if (picked.length > 0) {
+      onAppendFiles(picked);
+    }
+  };
+
+  const handleDropZoneDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDropZoneDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const dt = e.dataTransfer?.files;
+    const picked = dt && dt.length > 0 ? Array.from(dt) : [];
+    if (picked.length > 0) {
+      onAppendFiles(picked);
+    }
   };
 
   const handlePickFilesClick = () => {
@@ -92,7 +113,12 @@ const NewRecordAttachmentsField: React.FC<NewRecordAttachmentsFieldProps> = ({
         Imágenes, PDF u Office. Se acumulan en la lista y, al guardar, se suben a la columna nativa Attachments
         (SharePoint REST tras crear el registro), igual que en el formulario de equipo.
       </p>
-      <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 transition-colors hover:border-red-400">
+      <section
+        className="border-2 border-dashed border-gray-300 rounded-lg p-4 transition-colors hover:border-red-400"
+        onDragOver={handleDropZoneDragOver}
+        onDrop={handleDropZoneDrop}
+        aria-label="Zona para soltar archivos adjuntos"
+      >
         <div className="flex flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap">
           <input
             id={fileInputId}
@@ -116,7 +142,7 @@ const NewRecordAttachmentsField: React.FC<NewRecordAttachmentsFieldProps> = ({
             {attachmentSummaryText}
           </span>
         </div>
-      </div>
+      </section>
       {stagedFiles.length > 0 && (
         <ul className="mt-2 space-y-1 rounded-md border border-gray-200 bg-white p-2 text-sm">
           {stagedFiles.map((file, index) => (
@@ -155,11 +181,11 @@ export const NewRecordPage: React.FC = () => {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
 
-  const appendStagedFiles = useCallback((files: FileList | null) => {
-    if (!files?.length) {
+  const appendStagedFiles = useCallback((picked: File[]) => {
+    if (picked.length === 0) {
       return;
     }
-    setStagedFiles((prev) => [...prev, ...Array.from(files)]);
+    setStagedFiles((prev) => [...prev, ...picked]);
   }, []);
 
   const removeStagedFileAt = useCallback((index: number) => {
