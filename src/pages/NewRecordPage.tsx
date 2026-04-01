@@ -6,8 +6,9 @@ import { Input } from '../atoms/Input';
 import { Select } from '../atoms/Select';
 import { Card } from '../atoms/Card';
 import { sharePointService } from '../services/sharePointService';
+import { filesToAttachmentPayloads } from '../utils/attachmentFilePayload';
 import { Section, ActivityType, Activity } from '../types';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 
 interface FormData {
   tipoEquipoId: string;
@@ -18,7 +19,6 @@ interface FormData {
   activityTypeId: string;
   activityId: string;
   resource: string;
-  attachment: string;
   time: number;
 }
 
@@ -36,7 +36,6 @@ export const NewRecordPage: React.FC = () => {
       activityTypeId: '',
       activityId: '',
       resource: '',
-      attachment: '',
       time: 0,
     },
   });
@@ -51,6 +50,7 @@ export const NewRecordPage: React.FC = () => {
   /** Evita dejar los selects en disabled cuando la API devuelve listas vacías o falla (antes: disabled si length===0). */
   const [selectOptionsLoading, setSelectOptionsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [stagedFiles, setStagedFiles] = useState<File[]>([]);
 
   const toSelectOptions = (labels: string[]) =>
     labels.map((t) => ({ value: t, label: t }));
@@ -90,9 +90,21 @@ export const NewRecordPage: React.FC = () => {
     async (data: FormData) => {
       setLoading(true);
       try {
+        let attachmentFiles: Awaited<ReturnType<typeof filesToAttachmentPayloads>> | undefined;
+        if (stagedFiles.length > 0) {
+          try {
+            attachmentFiles = await filesToAttachmentPayloads(stagedFiles);
+          } catch (fileErr) {
+            const msg = fileErr instanceof Error ? fileErr.message : 'No se pudieron leer los adjuntos';
+            alert(msg);
+            return;
+          }
+        }
+
         await sharePointService.createRecord({
           ...data,
           createdBy: DEFAULT_CREATED_BY_USER_ID,
+          ...(attachmentFiles?.length ? { attachmentFiles } : {}),
         });
 
         alert('¡Registro creado exitosamente!');
@@ -104,7 +116,7 @@ export const NewRecordPage: React.FC = () => {
         setLoading(false);
       }
     },
-    [navigate]
+    [navigate, stagedFiles]
   );
 
   return (
@@ -219,12 +231,49 @@ export const NewRecordPage: React.FC = () => {
             />
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <Input
-                label="Adjunto"
-                type="text"
-                placeholder="Nombre del archivo adjunto o URL"
-                {...register('attachment')}
-              />
+              <div className="space-y-2">
+                <label className="block text-sm font-medium text-gray-700" htmlFor="new-record-attachments">
+                  Adjuntos
+                </label>
+                <p className="text-xs text-gray-500">
+                  Fotos o documentos (varios archivos). Se guardan en la columna nativa Attachments de SharePoint.
+                </p>
+                <input
+                  id="new-record-attachments"
+                  type="file"
+                  multiple
+                  className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border file:border-gray-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-50"
+                  onChange={(e) => {
+                    const list = e.target.files;
+                    if (list?.length) {
+                      setStagedFiles((prev) => [...prev, ...Array.from(list)]);
+                    }
+                    e.target.value = '';
+                  }}
+                />
+                {stagedFiles.length > 0 && (
+                  <ul className="mt-2 space-y-1 rounded-md border border-gray-200 bg-white p-2 text-sm">
+                    {stagedFiles.map((file, index) => (
+                      <li
+                        key={`${file.name}-${file.size}-${index}`}
+                        className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-gray-50"
+                      >
+                        <span className="truncate text-gray-800" title={file.name}>
+                          {file.name}
+                        </span>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded p-1 text-red-600 hover:bg-red-50"
+                          aria-label={`Quitar ${file.name}`}
+                          onClick={() => setStagedFiles((prev) => prev.filter((_, i) => i !== index))}
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
 
               <Input
                 label="Tiempo (minutos) *"

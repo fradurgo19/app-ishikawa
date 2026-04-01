@@ -42,6 +42,13 @@ export interface Attachment {
   size: number;
 }
 
+/** Archivos en base64 para crear adjuntos nativos en la lista SharePoint (Attachments). */
+export interface AttachmentFilePayload {
+  name: string;
+  contentType: string;
+  contentBase64: string;
+}
+
 export interface MachineRecord {
   id: string;
   tipoEquipoId: string;
@@ -52,7 +59,10 @@ export interface MachineRecord {
   activityTypeId: string;
   activityId: string;
   resource: string;
+  /** Primer adjunto (compatibilidad con vistas que solo muestran uno). */
   attachment?: Attachment;
+  /** Todos los adjuntos nativos cuando la fuente los expone (p. ej. AttachmentFiles en REST). */
+  attachments?: Attachment[];
   time: number;
   createdBy: string;
   createdAt: string;

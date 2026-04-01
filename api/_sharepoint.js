@@ -297,6 +297,77 @@ export async function createListItem(config, payload) {
   });
 }
 
+export async function fetchListItemById(config, itemId, options = {}) {
+  const expandAttachmentFiles = options.expandAttachmentFiles !== false;
+  const accessToken = await getAccessToken(config);
+  const encodedListTitle = escapeODataString(config.listTitle);
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw createHttpError(400, 'Invalid list item id');
+  }
+  const expand = expandAttachmentFiles ? '?$expand=AttachmentFiles' : '';
+  const url = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items(${id})${expand}`;
+
+  return sharePointRequest(config, accessToken, {
+    method: 'GET',
+    url,
+  });
+}
+
+const MAX_NATIVE_ATTACHMENT_BYTES = 15 * 1024 * 1024;
+const MAX_NATIVE_ATTACHMENTS_PER_ITEM = 20;
+
+/**
+ * Sube archivos a la columna nativa Attachments vía REST (AttachmentFiles/add).
+ * @param {Array<{ name: string, contentType?: string, contentBase64: string }>} attachmentFiles
+ */
+export async function uploadListItemNativeAttachments(config, itemId, attachmentFiles) {
+  if (!Array.isArray(attachmentFiles) || attachmentFiles.length === 0) {
+    return;
+  }
+  if (attachmentFiles.length > MAX_NATIVE_ATTACHMENTS_PER_ITEM) {
+    throw createHttpError(
+      400,
+      `At most ${MAX_NATIVE_ATTACHMENTS_PER_ITEM} attachments per request`
+    );
+  }
+
+  const accessToken = await getAccessToken(config);
+  const encodedListTitle = escapeODataString(config.listTitle);
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw createHttpError(400, 'Invalid list item id');
+  }
+
+  for (const file of attachmentFiles) {
+    const name = getTextValue(file?.name);
+    const b64 = typeof file?.contentBase64 === 'string' ? file.contentBase64.trim() : '';
+    if (!name || !b64) {
+      throw createHttpError(400, 'Each attachment must include non-empty name and contentBase64');
+    }
+    let buffer;
+    try {
+      buffer = Buffer.from(b64, 'base64');
+    } catch {
+      throw createHttpError(400, `Invalid base64 for attachment "${name}"`);
+    }
+    if (!buffer.length) {
+      throw createHttpError(400, `Empty attachment content for "${name}"`);
+    }
+    if (buffer.length > MAX_NATIVE_ATTACHMENT_BYTES) {
+      throw createHttpError(400, `Attachment "${name}" exceeds maximum size`);
+    }
+    const safeName = escapeODataString(name);
+    const addUrl = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items(${id})/AttachmentFiles/add(FileName='${safeName}')`;
+
+    await sharePointBinaryRequest(config, accessToken, {
+      method: 'POST',
+      url: addUrl,
+      body: buffer,
+    });
+  }
+}
+
 function getItemFieldText(item, internalName) {
   const key = getTextValue(internalName);
   if (!key || !item || typeof item !== 'object') {
@@ -333,9 +404,10 @@ function getItemFieldNumeric(item, internalName) {
 }
 
 export function mapListItemToMachineRecord(item, fieldMap, siteOrigin = '') {
-  const nativeAttachment = extractNativeAttachment(item, siteOrigin);
+  const nativeAttachments = extractNativeAttachments(item, siteOrigin);
   const customAttachment = extractCustomAttachment(item, fieldMap);
-  const resolvedAttachment = nativeAttachment || customAttachment;
+  const resolvedList = nativeAttachments.length > 0 ? nativeAttachments : customAttachment ? [customAttachment] : [];
+  const resolvedAttachment = resolvedList[0];
 
   const mappedRecord = {
     id: getTextValue(item.Id ?? item.ID ?? ''),
@@ -355,8 +427,9 @@ export function mapListItemToMachineRecord(item, fieldMap, siteOrigin = '') {
     updatedAt: toIsoString(item.Modified),
   };
 
-  if (resolvedAttachment) {
+  if (resolvedList.length > 0) {
     mappedRecord.attachment = resolvedAttachment;
+    mappedRecord.attachments = resolvedList;
   }
 
   return mappedRecord;
@@ -407,6 +480,19 @@ export function buildRecordPayload(record, fieldMap) {
   }
 
   return payload;
+}
+
+export function stripCustomAttachmentFieldsFromPayload(payload, fieldMap) {
+  if (!payload || typeof payload !== 'object' || !fieldMap) {
+    return;
+  }
+  const keys = [fieldMap.attachmentName, fieldMap.attachmentUrl, fieldMap.attachmentType, fieldMap.attachmentSize];
+  for (const k of keys) {
+    const key = getTextValue(k);
+    if (key && Object.prototype.hasOwnProperty.call(payload, key)) {
+      delete payload[key];
+    }
+  }
 }
 
 export function buildDictionaryFromRecords(records) {
@@ -1172,6 +1258,31 @@ async function getAccessToken(config) {
   return tokenPayload.access_token;
 }
 
+async function sharePointBinaryRequest(config, accessToken, { method, url, body }) {
+  const response = await fetch(url, {
+    method,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json;odata=nometadata',
+      'Content-Type': 'application/octet-stream',
+    },
+    body,
+  });
+  const responsePayload = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw createHttpError(502, 'SharePoint binary request failed', {
+      status: response.status,
+      statusText: response.statusText,
+      response: responsePayload,
+      request: { method, url },
+      listTitle: config.listTitle,
+    });
+  }
+
+  return responsePayload;
+}
+
 async function sharePointRequest(config, accessToken, { method, url, body }) {
   const requestOptions = {
     method,
@@ -1238,25 +1349,24 @@ function normalizeRequiredText(rawValue, fieldName) {
   return normalizedValue;
 }
 
-function extractNativeAttachment(item, siteOrigin) {
+function extractNativeAttachments(item, siteOrigin) {
   const attachmentFiles = Array.isArray(item.AttachmentFiles) ? item.AttachmentFiles : [];
-  if (attachmentFiles.length === 0) {
-    return null;
-  }
+  const itemId = getTextValue(item.Id ?? item.ID ?? Date.now().toString());
 
-  const firstAttachment = attachmentFiles[0];
-  const fileName = getTextValue(firstAttachment.FileName) || 'Adjunto';
-  const serverRelativeUrl = getTextValue(firstAttachment.ServerRelativeUrl);
-  const attachmentUrl = toAbsoluteAttachmentUrl(serverRelativeUrl, siteOrigin);
-  const attachmentSize = getNumericValue(firstAttachment.Length);
+  return attachmentFiles.map((fileRow, index) => {
+    const fileName = getTextValue(fileRow.FileName) || 'Adjunto';
+    const serverRelativeUrl = getTextValue(fileRow.ServerRelativeUrl);
+    const attachmentUrl = toAbsoluteAttachmentUrl(serverRelativeUrl, siteOrigin);
+    const attachmentSize = getNumericValue(fileRow.Length);
 
-  return {
-    id: `attachment-${getTextValue(item.Id ?? item.ID ?? Date.now().toString())}`,
-    name: fileName,
-    url: attachmentUrl,
-    type: 'application/octet-stream',
-    size: attachmentSize,
-  };
+    return {
+      id: `attachment-${itemId}-${index}-${fileName}`,
+      name: fileName,
+      url: attachmentUrl,
+      type: 'application/octet-stream',
+      size: attachmentSize,
+    };
+  });
 }
 
 function extractCustomAttachment(item, fieldMap) {

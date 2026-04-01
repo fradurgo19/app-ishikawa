@@ -1,5 +1,5 @@
 import type { ClientFieldMap } from '../config/clientSharePointFieldMap';
-import type { MachineRecord } from '../types';
+import type { Attachment, AttachmentFilePayload, MachineRecord } from '../types';
 import {
   buildDictionaryFromRecords,
   mergeFieldChoiceOptionsFromRecordsAndDictionary,
@@ -60,7 +60,7 @@ async function graphRequestJson<T>(
   const response = await fetch(url, {
     method,
     headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
 
   if (!response.ok) {
@@ -161,14 +161,89 @@ function setOptionalAttachmentGraphFields(
  */
 export function buildGraphListItemFields(
   record: GraphCreateRecordInput,
-  fieldMap: ClientFieldMap
+  fieldMap: ClientFieldMap,
+  options?: { omitCustomAttachmentFields?: boolean }
 ): Record<string, string | number> {
   const fields: Record<string, string | number> = {};
   setRequiredGraphListFields(fields, record, fieldMap);
   setOptionalTipoEquipoAndTime(fields, record, fieldMap);
   setOptionalResourceAndCreatedBy(fields, record, fieldMap);
-  setOptionalAttachmentGraphFields(fields, record, fieldMap);
+  if (!options?.omitCustomAttachmentFields) {
+    setOptionalAttachmentGraphFields(fields, record, fieldMap);
+  }
   return fields;
+}
+
+const GRAPH_ATTACHMENT_FETCH_CHUNK = 8;
+
+interface GraphAttachmentApiRow {
+  id?: string;
+  name?: string;
+  size?: number;
+  contentType?: string;
+}
+
+async function fetchGraphListItemAttachments(
+  siteId: string,
+  listId: string,
+  itemId: string,
+  accessToken: string
+): Promise<Attachment[]> {
+  const url = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}/attachments`;
+  const data = await graphRequestJson<{ value?: GraphAttachmentApiRow[] }>(url, accessToken);
+  const rows = data.value || [];
+  return rows.map((row, idx) => ({
+    id: String(row.id ?? `att-${itemId}-${idx}`),
+    name: row.name || 'Adjunto',
+    url: '',
+    type: row.contentType || 'application/octet-stream',
+    size: Number(row.size) || 0,
+  }));
+}
+
+export async function uploadGraphListItemAttachments(options: {
+  siteId: string;
+  listId: string;
+  itemId: string;
+  accessToken: string;
+  files: AttachmentFilePayload[];
+}): Promise<void> {
+  const { siteId, listId, itemId, accessToken, files } = options;
+  const urlBase = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}/attachments`;
+  for (const file of files) {
+    await graphRequestJson(urlBase, accessToken, {
+      method: 'POST',
+      body: {
+        name: file.name,
+        contentBytes: file.contentBase64,
+      },
+    });
+  }
+}
+
+async function buildGraphNativeAttachmentMap(
+  siteId: string,
+  listId: string,
+  itemIds: string[],
+  accessToken: string
+): Promise<Map<string, Attachment[]>> {
+  const map = new Map<string, Attachment[]>();
+  for (let i = 0; i < itemIds.length; i += GRAPH_ATTACHMENT_FETCH_CHUNK) {
+    const slice = itemIds.slice(i, i + GRAPH_ATTACHMENT_FETCH_CHUNK);
+    await Promise.all(
+      slice.map(async (id) => {
+        try {
+          const list = await fetchGraphListItemAttachments(siteId, listId, id, accessToken);
+          if (list.length > 0) {
+            map.set(id, list);
+          }
+        } catch {
+          /* Algunos tenants o listas no exponen adjuntos vía Graph; se ignora. */
+        }
+      })
+    );
+  }
+  return map;
 }
 
 export async function createSharePointListItemViaMicrosoftGraph(options: {
@@ -177,12 +252,16 @@ export async function createSharePointListItemViaMicrosoftGraph(options: {
   fieldMap: ClientFieldMap;
   accessToken: string;
   record: GraphCreateRecordInput;
+  attachmentFiles?: AttachmentFilePayload[];
 }): Promise<MachineRecord> {
-  const { siteUrl, listName, fieldMap, accessToken, record } = options;
+  const { siteUrl, listName, fieldMap, accessToken, record, attachmentFiles } = options;
 
   const siteId = await resolveGraphSiteId(siteUrl, accessToken);
   const listId = await resolveGraphListId(siteId, listName, accessToken);
-  const fieldsPayload = buildGraphListItemFields(record, fieldMap);
+  const useNativeAttachments = (attachmentFiles?.length ?? 0) > 0;
+  const fieldsPayload = buildGraphListItemFields(record, fieldMap, {
+    omitCustomAttachmentFields: useNativeAttachments,
+  });
   const createUrl = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items`;
 
   const created = await graphRequestJson<GraphListItem>(createUrl, accessToken, {
@@ -190,17 +269,25 @@ export async function createSharePointListItemViaMicrosoftGraph(options: {
     body: { fields: fieldsPayload },
   });
 
-  const hasFields = created.fields && Object.keys(created.fields).length > 0;
-  if (hasFields) {
-    return mapGraphListItemToMachineRecord(created, fieldMap);
+  const itemId = String(created.id);
+  if (useNativeAttachments && attachmentFiles) {
+    await uploadGraphListItemAttachments({
+      siteId,
+      listId,
+      itemId,
+      accessToken,
+      files: attachmentFiles,
+    });
   }
 
-  const itemId = String(created.id);
   const expanded = await graphRequestJson<GraphListItem>(
     `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${itemId}?$expand=fields`,
     accessToken
   );
-  return mapGraphListItemToMachineRecord(expanded, fieldMap);
+  const nativeList = await fetchGraphListItemAttachments(siteId, listId, itemId, accessToken).catch(
+    () => [] as Attachment[]
+  );
+  return mapGraphListItemToMachineRecord(expanded, fieldMap, nativeList);
 }
 
 export async function resolveGraphSiteId(siteUrl: string, accessToken: string): Promise<string> {
@@ -235,9 +322,7 @@ export async function resolveGraphListId(
   }
 
   const match = allLists.find(
-    (l) =>
-      (l.displayName && l.displayName.toLowerCase() === wanted) ||
-      (l.name && l.name.toLowerCase() === wanted)
+    (l) => l.displayName?.toLowerCase() === wanted || l.name?.toLowerCase() === wanted
   );
   if (!match?.id) {
     throw new Error(`Microsoft Graph: list "${listDisplayName}" not found`);
@@ -332,17 +417,52 @@ function fieldNumber(fields: Record<string, unknown>, key: string | undefined): 
   return Number.isFinite(n) ? n : 0;
 }
 
+function extractCustomAttachmentFromGraphFields(
+  fields: Record<string, unknown>,
+  fieldMap: ClientFieldMap,
+  itemId: string
+): Attachment | undefined {
+  const attachmentName = fieldText(fields, fieldMap.attachmentName);
+  const attachmentUrl = fieldText(fields, fieldMap.attachmentUrl);
+  const attachmentType = fieldText(fields, fieldMap.attachmentType);
+  const attachmentSize = fieldMap.attachmentSize ? fieldNumber(fields, fieldMap.attachmentSize) : 0;
+  if (!attachmentName && !attachmentUrl) {
+    return undefined;
+  }
+  return {
+    id: `attachment-${itemId}-custom`,
+    name: attachmentName || 'Adjunto',
+    url: attachmentUrl,
+    type: attachmentType || 'application/octet-stream',
+    size: attachmentSize,
+  };
+}
+
 export function mapGraphListItemToMachineRecord(
   item: GraphListItem,
-  fieldMap: ClientFieldMap
+  fieldMap: ClientFieldMap,
+  nativeAttachments?: Attachment[]
 ): MachineRecord {
   const f = item.fields || {};
+  const idStr = String(item.id);
   const createdBy = fieldMap.createdBy
     ? fieldText(f, fieldMap.createdBy)
     : '';
 
+  const natives = nativeAttachments?.filter((a) => a?.name) ?? [];
+  const custom = extractCustomAttachmentFromGraphFields(f, fieldMap, idStr);
+  let resolvedList: Attachment[];
+  if (natives.length > 0) {
+    resolvedList = natives;
+  } else if (custom) {
+    resolvedList = [custom];
+  } else {
+    resolvedList = [];
+  }
+  const first = resolvedList[0];
+
   return {
-    id: String(item.id),
+    id: idStr,
     tipoEquipoId: fieldMap.tipoEquipo ? fieldText(f, fieldMap.tipoEquipo) : '',
     brandId: fieldText(f, fieldMap.brand),
     modelId: fieldText(f, fieldMap.model),
@@ -355,6 +475,7 @@ export function mapGraphListItemToMachineRecord(
     createdBy: createdBy || 'system',
     createdAt: item.createdDateTime || new Date().toISOString(),
     updatedAt: item.lastModifiedDateTime || new Date().toISOString(),
+    ...(first ? { attachment: first, attachments: resolvedList } : {}),
   };
 }
 
@@ -392,7 +513,13 @@ export async function fetchSharePointListViaMicrosoftGraph(options: {
     fetchAllGraphListItems(siteId, listId, accessToken),
   ]);
 
-  const records = items.map((item) => mapGraphListItemToMachineRecord(item, fieldMap));
+  const itemIds = items.map((it) => String(it.id));
+  const attachmentMap = await buildGraphNativeAttachmentMap(siteId, listId, itemIds, accessToken);
+
+  const records = items.map((item) => {
+    const id = String(item.id);
+    return mapGraphListItemToMachineRecord(item, fieldMap, attachmentMap.get(id));
+  });
   const baseDictionary = buildDictionaryFromRecords(records);
   const graphChoices = extractChoiceOptionsFromColumns(columns, fieldMap);
   const fieldChoiceOptions = mergeFieldChoiceOptionsFromRecordsAndDictionary(

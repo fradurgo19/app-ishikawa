@@ -572,6 +572,13 @@ function buildActivityNode(record: MachineRecord, activities: Activity[]): Fishb
   };
 }
 
+function listRecordAttachments(record: MachineRecord) {
+  if (record.attachments?.length) {
+    return record.attachments;
+  }
+  return record.attachment ? [record.attachment] : [];
+}
+
 function buildDetailNodes(record: MachineRecord): FishboneNode[] {
   const detailNodes: FishboneNode[] = [
     {
@@ -590,13 +597,13 @@ function buildDetailNodes(record: MachineRecord): FishboneNode[] {
     },
   ];
 
-  if (record.attachment) {
+  for (const att of listRecordAttachments(record)) {
     detailNodes.push({
-      id: `attachment-${record.id}`,
+      id: `attachment-${record.id}-${att.id}`,
       type: 'adjunto',
-      label: record.attachment.name,
+      label: att.name,
       expanded: false,
-      data: record.attachment,
+      data: att,
       children: [],
     });
   }

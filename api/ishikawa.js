@@ -5,11 +5,14 @@ import {
   createListItem,
   enrichDictionaryWithSharePointFieldChoices,
   fetchAllListItems,
+  fetchListItemById,
   filterRecords,
   getSharePointConfig,
   mapListItemToMachineRecord,
   mergeFieldChoiceOptionsFromRecordsAndDictionary,
   resolveFieldMapWithListSchema,
+  stripCustomAttachmentFieldsFromPayload,
+  uploadListItemNativeAttachments,
 } from './_sharepoint.js';
 
 const ALLOWED_RESOURCES = Object.freeze(['records', 'dictionary']);
@@ -98,10 +101,27 @@ export default async function handler(req, res) {
         throw createHttpError(400, 'Request body must include a "record" object');
       }
 
+      const attachmentFiles = normalizeAttachmentFilesFromRequest(requestBody.attachmentFiles);
       const payload = buildRecordPayload(incomingRecord, sharePointConfigResolved.fieldMap);
+      if (attachmentFiles.length > 0) {
+        stripCustomAttachmentFieldsFromPayload(payload, sharePointConfigResolved.fieldMap);
+      }
+
       const createdItem = await createListItem(sharePointConfigResolved, payload);
+      const itemId = createdItem.Id ?? createdItem.ID ?? createdItem.id;
+      if (attachmentFiles.length > 0) {
+        if (itemId === undefined || itemId === null || itemId === '') {
+          throw createHttpError(502, 'List item created without id; cannot upload attachments');
+        }
+        await uploadListItemNativeAttachments(sharePointConfigResolved, itemId, attachmentFiles);
+      }
+
+      const reloadedItem =
+        attachmentFiles.length > 0
+          ? await fetchListItemById(sharePointConfigResolved, itemId)
+          : createdItem;
       const createdRecord = mapListItemToMachineRecord(
-        createdItem,
+        reloadedItem,
         sharePointConfigResolved.fieldMap,
         sharePointConfigResolved.siteOrigin
       );
@@ -160,6 +180,35 @@ function extractRecordFilters(query) {
   });
 
   return filters;
+}
+
+function normalizeAttachmentFilesFromRequest(raw) {
+  if (raw === undefined || raw === null) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    throw createHttpError(400, 'attachmentFiles must be an array when provided');
+  }
+  const out = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const name = typeof entry.name === 'string' ? entry.name.trim() : '';
+    const contentBase64 = typeof entry.contentBase64 === 'string' ? entry.contentBase64.trim() : '';
+    if (!name || !contentBase64) {
+      continue;
+    }
+    const contentType =
+      typeof entry.contentType === 'string' && entry.contentType.trim()
+        ? entry.contentType.trim()
+        : 'application/octet-stream';
+    out.push({ name, contentType, contentBase64 });
+  }
+  if (raw.length > 0 && out.length === 0) {
+    throw createHttpError(400, 'attachmentFiles entries must include non-empty name and contentBase64');
+  }
+  return out;
 }
 
 function parseRequestBody(rawBody) {

@@ -301,16 +301,32 @@ export const DataTablePage: React.FC = () => {
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {record.attachment && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={Download}
-                          onClick={() => alert('La funcionalidad de descarga se implementaría aquí')}
-                        >
-                          Descargar
-                        </Button>
-                      )}
+                      {(() => {
+                        const atts = record.attachments?.length
+                          ? record.attachments
+                          : record.attachment
+                            ? [record.attachment]
+                            : [];
+                        if (!atts.length) {
+                          return <span className="text-sm text-gray-400">—</span>;
+                        }
+                        return (
+                          <div className="flex flex-col gap-1 max-w-[14rem]">
+                            {atts.map((att) => (
+                              <a
+                                key={att.id}
+                                href={att.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline truncate"
+                              >
+                                <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                <span className="truncate">{att.name}</span>
+                              </a>
+                            ))}
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}

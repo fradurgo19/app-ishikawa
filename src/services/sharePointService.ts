@@ -2,6 +2,7 @@ import {
   Activity,
   ActivityType,
   Attachment,
+  AttachmentFilePayload,
   Brand,
   KPIData,
   MachineRecord,
@@ -18,9 +19,19 @@ import {
 } from './microsoftGraphListService';
 import { sharePointService as mockSharePointService } from './mockSharePointService';
 
-type CreateRecordInput = Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt' | 'attachment'> & {
+type CreateRecordInput = Omit<
+  MachineRecord,
+  'id' | 'createdAt' | 'updatedAt' | 'attachment' | 'attachments'
+> & {
   attachment?: Attachment | string;
+  /** Archivos para la columna nativa Attachments (Graph o REST). */
+  attachmentFiles?: AttachmentFilePayload[];
 };
+
+/** Registro persistible sin id ni marcas de tiempo de servidor (Graph / POST /api). */
+type MachineRecordWithoutMeta = Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'>;
+
+type CreateRecordFieldsInput = Omit<CreateRecordInput, 'attachmentFiles'>;
 
 /** Opciones tal como en columnas Choice de SharePoint (texto del valor guardado). */
 interface FieldChoiceOptions {
@@ -102,7 +113,7 @@ function isDelegatedOnlySharePointMode(): boolean {
 
 /** Origen absoluto del API (producción mismo sitio: vacío). En dev con Vite, suele bastar el proxy /api. */
 function apiUrl(pathWithQuery: string): string {
-  const raw = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? '';
+  const raw = (import.meta.env.VITE_API_BASE_URL ?? '').trim();
   const base = raw.replace(/\/$/, '');
   const path = pathWithQuery.startsWith('/') ? pathWithQuery : `/${pathWithQuery}`;
   return base ? `${base}${path}` : path;
@@ -254,7 +265,8 @@ class LiveSharePointService implements SharePointDataService {
    * Lanza si modo delegado-only sin token o si Graph falla y no hay fallback.
    */
   private async tryPersistRecordViaMicrosoftGraph(
-    normalized: Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'>
+    normalized: MachineRecordWithoutMeta,
+    attachmentFiles?: AttachmentFilePayload[]
   ): Promise<MachineRecord | null> {
     const ctx = await resolveGraphListContext();
     if (!ctx) {
@@ -278,6 +290,7 @@ class LiveSharePointService implements SharePointDataService {
         fieldMap: getClientFieldMap(),
         accessToken: token,
         record: normalized,
+        attachmentFiles,
       });
     } catch (graphError) {
       if (isDelegatedOnlySharePointMode()) {
@@ -303,9 +316,7 @@ class LiveSharePointService implements SharePointDataService {
       return null;
     }
 
-    if (this.graphDataLoader === null) {
-      this.graphDataLoader = this.loadSharePointListFromGraph(token, ctx);
-    }
+    this.graphDataLoader ??= this.loadSharePointListFromGraph(token, ctx);
 
     try {
       return await this.graphDataLoader;
@@ -501,14 +512,21 @@ class LiveSharePointService implements SharePointDataService {
   }
 
   async createRecord(record: CreateRecordInput): Promise<MachineRecord> {
-    const normalized = normalizeCreateRecordInput(record);
-    const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized);
+    const { attachmentFiles, ...recordFields } = record;
+    const normalized = normalizeCreateRecordInput(recordFields);
+    const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized, attachmentFiles);
     if (graphRecord) {
       this.invalidateCaches();
       return normalizeRecord(graphRecord);
     }
 
-    const payload = { record: normalized };
+    const payload: {
+      record: MachineRecordWithoutMeta;
+      attachmentFiles?: AttachmentFilePayload[];
+    } = { record: normalized };
+    if (attachmentFiles?.length) {
+      payload.attachmentFiles = attachmentFiles;
+    }
 
     const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
       method: 'POST',
@@ -561,7 +579,7 @@ const mockServiceAdapter: SharePointDataService = {
   getActivities: (activityTypeId?: string) => mockSharePointService.getActivities(activityTypeId),
   getRecords: (filters?: Partial<MachineRecord>) => mockSharePointService.getRecords(filters),
   createRecord: (record: CreateRecordInput) =>
-    mockSharePointService.createRecord(normalizeCreateRecordInput(record)),
+    mockSharePointService.createRecord(toMockCreateRecordPayload(record)),
   getKPIs: () => mockSharePointService.getKPIs(),
   refreshDictionary: async () => {},
 };
@@ -629,18 +647,40 @@ function sortActivities(activities: Activity[]): Activity[] {
   return [...activities].sort((a, b) => a.name.localeCompare(b.name, 'es'));
 }
 
+function toMockCreateRecordPayload(
+  record: CreateRecordInput
+): MachineRecordWithoutMeta & { attachmentFiles?: AttachmentFilePayload[] } {
+  const { attachmentFiles, ...recordFields } = record;
+  const normalized = normalizeCreateRecordInput(recordFields);
+  return { ...normalized, attachmentFiles };
+}
+
 function normalizeRecord(record: MachineRecord): MachineRecord {
+  const primary = normalizeAttachment(record.attachment);
+  const listNorm =
+    record.attachments
+      ?.map((a) => normalizeAttachment(a))
+      .filter((x): x is Attachment => Boolean(x)) ?? undefined;
+  let mergedList: Attachment[] | undefined;
+  if (listNorm?.length) {
+    mergedList = listNorm;
+  } else if (primary) {
+    mergedList = [primary];
+  } else {
+    mergedList = undefined;
+  }
+  const first = primary ?? mergedList?.[0];
+
   return {
     ...record,
     tipoEquipoId: normalizeText(record.tipoEquipoId),
     time: Number.isFinite(Number(record.time)) ? Number(record.time) : 0,
-    attachment: normalizeAttachment(record.attachment),
+    attachment: first,
+    attachments: mergedList?.length ? mergedList : undefined,
   };
 }
 
-function normalizeCreateRecordInput(
-  record: CreateRecordInput
-): Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'> {
+function normalizeCreateRecordInput(record: CreateRecordFieldsInput): MachineRecordWithoutMeta {
   return {
     ...record,
     tipoEquipoId: normalizeText(record.tipoEquipoId),
