@@ -265,8 +265,7 @@ class LiveSharePointService implements SharePointDataService {
    * Lanza si modo delegado-only sin token o si Graph falla y no hay fallback.
    */
   private async tryPersistRecordViaMicrosoftGraph(
-    normalized: MachineRecordWithoutMeta,
-    attachmentFiles?: AttachmentFilePayload[]
+    normalized: MachineRecordWithoutMeta
   ): Promise<MachineRecord | null> {
     const ctx = await resolveGraphListContext();
     if (!ctx) {
@@ -290,7 +289,6 @@ class LiveSharePointService implements SharePointDataService {
         fieldMap: getClientFieldMap(),
         accessToken: token,
         record: normalized,
-        attachmentFiles,
       });
     } catch (graphError) {
       if (isDelegatedOnlySharePointMode()) {
@@ -514,10 +512,19 @@ class LiveSharePointService implements SharePointDataService {
   async createRecord(record: CreateRecordInput): Promise<MachineRecord> {
     const { attachmentFiles, ...recordFields } = record;
     const normalized = normalizeCreateRecordInput(recordFields);
-    const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized, attachmentFiles);
-    if (graphRecord) {
-      this.invalidateCaches();
-      return normalizeRecord(graphRecord);
+    const hasNativeAttachmentFiles = Boolean(attachmentFiles?.length);
+
+    /**
+     * Adjuntos en la columna nativa Attachments de SharePoint: usar siempre POST /api/ishikawa + REST
+     * (AttachmentFiles/add). Microsoft Graph POST .../items/{id}/attachments suele no persistir o no estar
+     * soportado de forma equivalente en muchos tenants; el servidor ya sube binarios con credenciales de app.
+     */
+    if (!hasNativeAttachmentFiles) {
+      const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized);
+      if (graphRecord) {
+        this.invalidateCaches();
+        return normalizeRecord(graphRecord);
+      }
     }
 
     const payload: {

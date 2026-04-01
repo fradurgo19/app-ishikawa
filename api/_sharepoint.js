@@ -339,9 +339,16 @@ export async function uploadListItemNativeAttachments(config, itemId, attachment
     throw createHttpError(400, 'Invalid list item id');
   }
 
+  let digest;
+  try {
+    digest = await getSharePointFormDigest(config, accessToken);
+  } catch {
+    digest = undefined;
+  }
+
   for (const file of attachmentFiles) {
     const name = getTextValue(file?.name);
-    const b64 = typeof file?.contentBase64 === 'string' ? file.contentBase64.trim() : '';
+    const b64 = sanitizeAttachmentContentBase64(file?.contentBase64 ?? '');
     if (!name || !b64) {
       throw createHttpError(400, 'Each attachment must include non-empty name and contentBase64');
     }
@@ -364,6 +371,7 @@ export async function uploadListItemNativeAttachments(config, itemId, attachment
       method: 'POST',
       url: addUrl,
       body: buffer,
+      digest,
     });
   }
 }
@@ -406,7 +414,14 @@ function getItemFieldNumeric(item, internalName) {
 export function mapListItemToMachineRecord(item, fieldMap, siteOrigin = '') {
   const nativeAttachments = extractNativeAttachments(item, siteOrigin);
   const customAttachment = extractCustomAttachment(item, fieldMap);
-  const resolvedList = nativeAttachments.length > 0 ? nativeAttachments : customAttachment ? [customAttachment] : [];
+  let resolvedList;
+  if (nativeAttachments.length > 0) {
+    resolvedList = nativeAttachments;
+  } else if (customAttachment) {
+    resolvedList = [customAttachment];
+  } else {
+    resolvedList = [];
+  }
   const resolvedAttachment = resolvedList[0];
 
   const mappedRecord = {
@@ -489,7 +504,7 @@ export function stripCustomAttachmentFieldsFromPayload(payload, fieldMap) {
   const keys = [fieldMap.attachmentName, fieldMap.attachmentUrl, fieldMap.attachmentType, fieldMap.attachmentSize];
   for (const k of keys) {
     const key = getTextValue(k);
-    if (key && Object.prototype.hasOwnProperty.call(payload, key)) {
+    if (key && Object.hasOwn(payload, key)) {
       delete payload[key];
     }
   }
@@ -1258,14 +1273,51 @@ async function getAccessToken(config) {
   return tokenPayload.access_token;
 }
 
-async function sharePointBinaryRequest(config, accessToken, { method, url, body }) {
+export function sanitizeAttachmentContentBase64(raw) {
+  return typeof raw === 'string' ? raw.replaceAll(/\s/g, '') : '';
+}
+
+/** SharePoint Online suele exigir X-RequestDigest en POST que modifican contenido (p. ej. AttachmentFiles/add). */
+async function getSharePointFormDigest(config, accessToken) {
+  const url = `${config.siteUrl}/_api/contextinfo`;
   const response = await fetch(url, {
-    method,
+    method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: 'application/json;odata=nometadata',
-      'Content-Type': 'application/octet-stream',
+      'Content-Type': 'application/json;odata=nometadata',
     },
+    body: '{}',
+  });
+  const responsePayload = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(502, 'SharePoint form digest request failed', {
+      status: response.status,
+      statusText: response.statusText,
+      response: responsePayload,
+    });
+  }
+  const digest =
+    getTextValue(responsePayload.FormDigestValue) ||
+    getTextValue(responsePayload.d?.FormDigestValue);
+  if (!digest) {
+    throw createHttpError(502, 'SharePoint returned no FormDigestValue', responsePayload);
+  }
+  return digest;
+}
+
+async function sharePointBinaryRequest(config, accessToken, { method, url, body, digest }) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/json;odata=nometadata',
+    'Content-Type': 'application/octet-stream',
+  };
+  if (digest) {
+    headers['X-RequestDigest'] = digest;
+  }
+  const response = await fetch(url, {
+    method,
+    headers,
     body,
   });
   const responsePayload = await parseJsonResponse(response);

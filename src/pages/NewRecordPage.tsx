@@ -24,6 +24,76 @@ interface FormData {
 
 const DEFAULT_CREATED_BY_USER_ID = '1';
 
+interface StagedAttachmentRowProps {
+  file: File;
+  index: number;
+  onRemove: (index: number) => void;
+}
+
+const StagedAttachmentRow: React.FC<StagedAttachmentRowProps> = ({ file, index, onRemove }) => {
+  const handleRemoveClick = () => {
+    onRemove(index);
+  };
+
+  return (
+    <li className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-gray-50">
+      <span className="truncate text-gray-800" title={file.name}>
+        {file.name}
+      </span>
+      <button
+        type="button"
+        className="shrink-0 rounded p-1 text-red-600 hover:bg-red-50"
+        aria-label={`Quitar ${file.name}`}
+        onClick={handleRemoveClick}
+      >
+        <Trash2 className="h-4 w-4" aria-hidden />
+      </button>
+    </li>
+  );
+};
+
+interface NewRecordAttachmentsFieldProps {
+  stagedFiles: File[];
+  onAppendFiles: (files: FileList | null) => void;
+  onRemoveAt: (index: number) => void;
+}
+
+const NewRecordAttachmentsField: React.FC<NewRecordAttachmentsFieldProps> = ({
+  stagedFiles,
+  onAppendFiles,
+  onRemoveAt,
+}) => {
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onAppendFiles(e.target.files);
+    e.target.value = '';
+  };
+
+  return (
+    <div className="space-y-2">
+      <label className="block text-sm font-medium text-gray-700" htmlFor="new-record-attachments">
+        Adjuntos
+      </label>
+      <p className="text-xs text-gray-500">
+        Fotos o documentos (varios archivos). Se guardan en la columna nativa Attachments de SharePoint.
+      </p>
+      <input
+        id="new-record-attachments"
+        type="file"
+        multiple
+        className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border file:border-gray-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-50"
+        onChange={handleFileInputChange}
+      />
+      {stagedFiles.length > 0 && (
+        <ul className="mt-2 space-y-1 rounded-md border border-gray-200 bg-white p-2 text-sm">
+          {stagedFiles.map((file, index) => (
+            <StagedAttachmentRow key={`${file.name}-${file.size}-${index}`} file={file} index={index} onRemove={onRemoveAt} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+};
+
 export const NewRecordPage: React.FC = () => {
   const navigate = useNavigate();
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
@@ -51,6 +121,17 @@ export const NewRecordPage: React.FC = () => {
   const [selectOptionsLoading, setSelectOptionsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [stagedFiles, setStagedFiles] = useState<File[]>([]);
+
+  const appendStagedFiles = useCallback((files: FileList | null) => {
+    if (!files?.length) {
+      return;
+    }
+    setStagedFiles((prev) => [...prev, ...Array.from(files)]);
+  }, []);
+
+  const removeStagedFileAt = useCallback((index: number) => {
+    setStagedFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
   const toSelectOptions = (labels: string[]) =>
     labels.map((t) => ({ value: t, label: t }));
@@ -231,49 +312,11 @@ export const NewRecordPage: React.FC = () => {
             />
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-gray-700" htmlFor="new-record-attachments">
-                  Adjuntos
-                </label>
-                <p className="text-xs text-gray-500">
-                  Fotos o documentos (varios archivos). Se guardan en la columna nativa Attachments de SharePoint.
-                </p>
-                <input
-                  id="new-record-attachments"
-                  type="file"
-                  multiple
-                  className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border file:border-gray-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-50"
-                  onChange={(e) => {
-                    const list = e.target.files;
-                    if (list?.length) {
-                      setStagedFiles((prev) => [...prev, ...Array.from(list)]);
-                    }
-                    e.target.value = '';
-                  }}
-                />
-                {stagedFiles.length > 0 && (
-                  <ul className="mt-2 space-y-1 rounded-md border border-gray-200 bg-white p-2 text-sm">
-                    {stagedFiles.map((file, index) => (
-                      <li
-                        key={`${file.name}-${file.size}-${index}`}
-                        className="flex items-center justify-between gap-2 rounded px-1 py-0.5 hover:bg-gray-50"
-                      >
-                        <span className="truncate text-gray-800" title={file.name}>
-                          {file.name}
-                        </span>
-                        <button
-                          type="button"
-                          className="shrink-0 rounded p-1 text-red-600 hover:bg-red-50"
-                          aria-label={`Quitar ${file.name}`}
-                          onClick={() => setStagedFiles((prev) => prev.filter((_, i) => i !== index))}
-                        >
-                          <Trash2 className="h-4 w-4" aria-hidden />
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
+              <NewRecordAttachmentsField
+                stagedFiles={stagedFiles}
+                onAppendFiles={appendStagedFiles}
+                onRemoveAt={removeStagedFileAt}
+              />
 
               <Input
                 label="Tiempo (minutos) *"

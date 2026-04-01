@@ -1,5 +1,5 @@
 import type { ClientFieldMap } from '../config/clientSharePointFieldMap';
-import type { Attachment, AttachmentFilePayload, MachineRecord } from '../types';
+import type { Attachment, MachineRecord } from '../types';
 import {
   buildDictionaryFromRecords,
   mergeFieldChoiceOptionsFromRecordsAndDictionary,
@@ -161,16 +161,13 @@ function setOptionalAttachmentGraphFields(
  */
 export function buildGraphListItemFields(
   record: GraphCreateRecordInput,
-  fieldMap: ClientFieldMap,
-  options?: { omitCustomAttachmentFields?: boolean }
+  fieldMap: ClientFieldMap
 ): Record<string, string | number> {
   const fields: Record<string, string | number> = {};
   setRequiredGraphListFields(fields, record, fieldMap);
   setOptionalTipoEquipoAndTime(fields, record, fieldMap);
   setOptionalResourceAndCreatedBy(fields, record, fieldMap);
-  if (!options?.omitCustomAttachmentFields) {
-    setOptionalAttachmentGraphFields(fields, record, fieldMap);
-  }
+  setOptionalAttachmentGraphFields(fields, record, fieldMap);
   return fields;
 }
 
@@ -199,26 +196,6 @@ async function fetchGraphListItemAttachments(
     type: row.contentType || 'application/octet-stream',
     size: Number(row.size) || 0,
   }));
-}
-
-export async function uploadGraphListItemAttachments(options: {
-  siteId: string;
-  listId: string;
-  itemId: string;
-  accessToken: string;
-  files: AttachmentFilePayload[];
-}): Promise<void> {
-  const { siteId, listId, itemId, accessToken, files } = options;
-  const urlBase = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${encodeURIComponent(itemId)}/attachments`;
-  for (const file of files) {
-    await graphRequestJson(urlBase, accessToken, {
-      method: 'POST',
-      body: {
-        name: file.name,
-        contentBytes: file.contentBase64,
-      },
-    });
-  }
 }
 
 async function buildGraphNativeAttachmentMap(
@@ -252,16 +229,12 @@ export async function createSharePointListItemViaMicrosoftGraph(options: {
   fieldMap: ClientFieldMap;
   accessToken: string;
   record: GraphCreateRecordInput;
-  attachmentFiles?: AttachmentFilePayload[];
 }): Promise<MachineRecord> {
-  const { siteUrl, listName, fieldMap, accessToken, record, attachmentFiles } = options;
+  const { siteUrl, listName, fieldMap, accessToken, record } = options;
 
   const siteId = await resolveGraphSiteId(siteUrl, accessToken);
   const listId = await resolveGraphListId(siteId, listName, accessToken);
-  const useNativeAttachments = (attachmentFiles?.length ?? 0) > 0;
-  const fieldsPayload = buildGraphListItemFields(record, fieldMap, {
-    omitCustomAttachmentFields: useNativeAttachments,
-  });
+  const fieldsPayload = buildGraphListItemFields(record, fieldMap);
   const createUrl = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items`;
 
   const created = await graphRequestJson<GraphListItem>(createUrl, accessToken, {
@@ -270,15 +243,6 @@ export async function createSharePointListItemViaMicrosoftGraph(options: {
   });
 
   const itemId = String(created.id);
-  if (useNativeAttachments && attachmentFiles) {
-    await uploadGraphListItemAttachments({
-      siteId,
-      listId,
-      itemId,
-      accessToken,
-      files: attachmentFiles,
-    });
-  }
 
   const expanded = await graphRequestJson<GraphListItem>(
     `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${itemId}?$expand=fields`,

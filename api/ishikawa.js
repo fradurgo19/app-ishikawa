@@ -11,6 +11,7 @@ import {
   mapListItemToMachineRecord,
   mergeFieldChoiceOptionsFromRecordsAndDictionary,
   resolveFieldMapWithListSchema,
+  sanitizeAttachmentContentBase64,
   stripCustomAttachmentFieldsFromPayload,
   uploadListItemNativeAttachments,
 } from './_sharepoint.js';
@@ -33,6 +34,79 @@ export const config = {
   maxDuration: 60,
 };
 
+async function writeDictionaryResponse(req, res, sharePointConfigResolved) {
+  enforceMethod(req.method, ['GET']);
+  const records = await safeLoadMappedRecords(sharePointConfigResolved);
+  let dictionary = buildDictionaryFromRecords(records);
+  try {
+    dictionary = await enrichDictionaryWithSharePointFieldChoices(
+      sharePointConfigResolved,
+      dictionary,
+      records
+    );
+  } catch {
+    dictionary = {
+      ...dictionary,
+      fieldChoiceOptions: mergeFieldChoiceOptionsFromRecordsAndDictionary(
+        dictionary,
+        records,
+        {
+          section: [],
+          activityType: [],
+          activity: [],
+          tipoEquipo: [],
+          brand: [],
+          model: [],
+        }
+      ),
+    };
+  }
+  setDictionaryDiagnosticHeaders(res, records, dictionary);
+  sendJson(res, 200, dictionary);
+}
+
+async function writeRecordsListResponse(req, res, sharePointConfigResolved) {
+  const records = await safeLoadMappedRecords(sharePointConfigResolved);
+  const filters = extractRecordFilters(req.query);
+  const filteredRecords = filterRecords(records, filters);
+  setRecordsListDiagnosticHeaders(res, records, filteredRecords);
+  sendJson(res, 200, { records: filteredRecords });
+}
+
+async function writeCreatedRecordResponse(req, res, sharePointConfigResolved) {
+  const requestBody = parseRequestBody(req.body);
+  const incomingRecord = requestBody.record;
+  if (!incomingRecord || typeof incomingRecord !== 'object') {
+    throw createHttpError(400, 'Request body must include a "record" object');
+  }
+
+  const attachmentFiles = normalizeAttachmentFilesFromRequest(requestBody.attachmentFiles);
+  const payload = buildRecordPayload(incomingRecord, sharePointConfigResolved.fieldMap);
+  if (attachmentFiles.length > 0) {
+    stripCustomAttachmentFieldsFromPayload(payload, sharePointConfigResolved.fieldMap);
+  }
+
+  const createdItem = await createListItem(sharePointConfigResolved, payload);
+  const itemId = createdItem.Id ?? createdItem.ID ?? createdItem.id;
+  if (attachmentFiles.length > 0) {
+    if (itemId === undefined || itemId === null || itemId === '') {
+      throw createHttpError(502, 'List item created without id; cannot upload attachments');
+    }
+    await uploadListItemNativeAttachments(sharePointConfigResolved, itemId, attachmentFiles);
+  }
+
+  const reloadedItem =
+    attachmentFiles.length > 0
+      ? await fetchListItemById(sharePointConfigResolved, itemId)
+      : createdItem;
+  const createdRecord = mapListItemToMachineRecord(
+    reloadedItem,
+    sharePointConfigResolved.fieldMap,
+    sharePointConfigResolved.siteOrigin
+  );
+  sendJson(res, 201, { record: createdRecord });
+}
+
 export default async function handler(req, res) {
   setJsonHeaders(res);
 
@@ -54,78 +128,17 @@ export default async function handler(req, res) {
     const sharePointConfigResolved = await withResolvedFieldMap(sharePointConfig);
 
     if (requestedResource === 'dictionary') {
-      enforceMethod(req.method, ['GET']);
-      const records = await safeLoadMappedRecords(sharePointConfigResolved);
-      let dictionary = buildDictionaryFromRecords(records);
-      try {
-        dictionary = await enrichDictionaryWithSharePointFieldChoices(
-          sharePointConfigResolved,
-          dictionary,
-          records
-        );
-      } catch {
-        dictionary = {
-          ...dictionary,
-          fieldChoiceOptions: mergeFieldChoiceOptionsFromRecordsAndDictionary(
-            dictionary,
-            records,
-            {
-              section: [],
-              activityType: [],
-              activity: [],
-              tipoEquipo: [],
-              brand: [],
-              model: [],
-            }
-          ),
-        };
-      }
-      setDictionaryDiagnosticHeaders(res, records, dictionary);
-      sendJson(res, 200, dictionary);
+      await writeDictionaryResponse(req, res, sharePointConfigResolved);
       return;
     }
 
     if (requestedResource === 'records' && req.method === 'GET') {
-      const records = await safeLoadMappedRecords(sharePointConfigResolved);
-      const filters = extractRecordFilters(req.query);
-      const filteredRecords = filterRecords(records, filters);
-      setRecordsListDiagnosticHeaders(res, records, filteredRecords);
-      sendJson(res, 200, { records: filteredRecords });
+      await writeRecordsListResponse(req, res, sharePointConfigResolved);
       return;
     }
 
     if (requestedResource === 'records' && req.method === 'POST') {
-      const requestBody = parseRequestBody(req.body);
-      const incomingRecord = requestBody.record;
-      if (!incomingRecord || typeof incomingRecord !== 'object') {
-        throw createHttpError(400, 'Request body must include a "record" object');
-      }
-
-      const attachmentFiles = normalizeAttachmentFilesFromRequest(requestBody.attachmentFiles);
-      const payload = buildRecordPayload(incomingRecord, sharePointConfigResolved.fieldMap);
-      if (attachmentFiles.length > 0) {
-        stripCustomAttachmentFieldsFromPayload(payload, sharePointConfigResolved.fieldMap);
-      }
-
-      const createdItem = await createListItem(sharePointConfigResolved, payload);
-      const itemId = createdItem.Id ?? createdItem.ID ?? createdItem.id;
-      if (attachmentFiles.length > 0) {
-        if (itemId === undefined || itemId === null || itemId === '') {
-          throw createHttpError(502, 'List item created without id; cannot upload attachments');
-        }
-        await uploadListItemNativeAttachments(sharePointConfigResolved, itemId, attachmentFiles);
-      }
-
-      const reloadedItem =
-        attachmentFiles.length > 0
-          ? await fetchListItemById(sharePointConfigResolved, itemId)
-          : createdItem;
-      const createdRecord = mapListItemToMachineRecord(
-        reloadedItem,
-        sharePointConfigResolved.fieldMap,
-        sharePointConfigResolved.siteOrigin
-      );
-      sendJson(res, 201, { record: createdRecord });
+      await writeCreatedRecordResponse(req, res, sharePointConfigResolved);
       return;
     }
 
@@ -195,7 +208,7 @@ function normalizeAttachmentFilesFromRequest(raw) {
       continue;
     }
     const name = typeof entry.name === 'string' ? entry.name.trim() : '';
-    const contentBase64 = typeof entry.contentBase64 === 'string' ? entry.contentBase64.trim() : '';
+    const contentBase64 = sanitizeAttachmentContentBase64(entry.contentBase64);
     if (!name || !contentBase64) {
       continue;
     }
