@@ -1,5 +1,10 @@
 import { PublicClientApplication, type AccountInfo } from '@azure/msal-browser';
-import { isMicrosoftAuthEnabled, loginRequest, msalConfig } from '../config/authConfig';
+import {
+  buildSharePointResourceScope,
+  isMicrosoftAuthEnabled,
+  loginRequest,
+  msalConfig,
+} from '../config/authConfig';
 
 const GRAPH_SCOPES = loginRequest.scopes;
 
@@ -161,6 +166,37 @@ async function acquireGraphAccessToken(): Promise<string | null> {
   }
 }
 
+/**
+ * Token para SharePoint REST en el sitio (scope `https://{host}.sharepoint.com/.default`).
+ * Distinto del token de Graph; necesario para AttachmentFiles/add desde el navegador.
+ */
+async function acquireSharePointAccessToken(siteUrl: string): Promise<string | null> {
+  if (!msalInstance) {
+    return null;
+  }
+
+  const resourceScope = buildSharePointResourceScope(siteUrl);
+  if (!resourceScope) {
+    return null;
+  }
+
+  await initializeAuth();
+  const account = getAccount();
+  if (!account) {
+    return null;
+  }
+
+  try {
+    const result = await msalInstance.acquireTokenSilent({
+      scopes: [resourceScope],
+      account,
+    });
+    return result.accessToken ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export const authService = {
   initializeAuth,
   getAccount,
@@ -169,4 +205,5 @@ export const authService = {
   logout,
   isMicrosoftAuthEnabled,
   acquireGraphAccessToken,
+  acquireSharePointAccessToken,
 };

@@ -1,13 +1,4 @@
-import {
-  AttachmentFilePayload,
-  Brand,
-  Model,
-  Section,
-  ActivityType,
-  Activity,
-  MachineRecord,
-  KPIData,
-} from '../types';
+import { Brand, Model, Section, ActivityType, Activity, MachineRecord, KPIData } from '../types';
 
 const LOCALE_SORT = 'es';
 
@@ -164,7 +155,7 @@ class MockSharePointService {
   }
 
   async createRecord(
-    record: Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'> & { attachmentFiles?: AttachmentFilePayload[] }
+    record: Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'> & { attachmentFiles?: File[] }
   ): Promise<MachineRecord> {
     await this.delay(800);
     const { attachmentFiles, ...rest } = record;
@@ -173,8 +164,8 @@ class MockSharePointService {
         id: `mock-att-${Date.now()}-${i}`,
         name: f.name,
         url: `https://example.invalid/mock/${encodeURIComponent(f.name)}`,
-        type: f.contentType || 'application/octet-stream',
-        size: Math.floor((f.contentBase64.length * 3) / 4),
+        type: f.type || 'application/octet-stream',
+        size: f.size,
       })) ?? [];
     const newRecord: MachineRecord = {
       ...rest,

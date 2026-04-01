@@ -61,4 +61,20 @@ function getDefaultRedirectUri(): string {
   return globalThis.window.location.origin;
 }
 
+/**
+ * Ámbito delegado para SharePoint REST (`/_api/...`), p. ej. AttachmentFiles/add.
+ * Debe coincidir con permisos delegados de la app en Azure (recurso SharePoint del tenant).
+ */
+export function buildSharePointResourceScope(siteUrl: string): string | null {
+  const trimmed = typeof siteUrl === 'string' ? siteUrl.trim() : '';
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    return `https://${new URL(trimmed).hostname}/.default`;
+  } catch {
+    return null;
+  }
+}
+
 

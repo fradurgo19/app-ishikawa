@@ -2,7 +2,6 @@ import {
   Activity,
   ActivityType,
   Attachment,
-  AttachmentFilePayload,
   Brand,
   KPIData,
   MachineRecord,
@@ -16,7 +15,10 @@ import { authService } from './authService';
 import {
   createSharePointListItemViaMicrosoftGraph,
   fetchSharePointListViaMicrosoftGraph,
+  loadGraphListItemAsMachineRecord,
 } from './microsoftGraphListService';
+import { uploadListItemAttachmentRest } from './sharePointRestAttachments';
+import { filesToAttachmentPayloads } from '../utils/attachmentFilePayload';
 import { sharePointService as mockSharePointService } from './mockSharePointService';
 
 type CreateRecordInput = Omit<
@@ -24,8 +26,8 @@ type CreateRecordInput = Omit<
   'id' | 'createdAt' | 'updatedAt' | 'attachment' | 'attachments'
 > & {
   attachment?: Attachment | string;
-  /** Archivos para la columna nativa Attachments (Graph o REST). */
-  attachmentFiles?: AttachmentFilePayload[];
+  /** Archivos locales: tras crear el ítem se suben por SharePoint REST con token del sitio (o fallback API en base64). */
+  attachmentFiles?: File[];
 };
 
 /** Registro persistible sin id ni marcas de tiempo de servidor (Graph / POST /api). */
@@ -207,6 +209,14 @@ const RECORD_QUERY_FILTER_KEYS: Array<keyof MachineRecord> = [
 
 const MSG_DELEGATED_SIGNIN_REQUIRED =
   'Inicie sesión con Microsoft para guardar registros. Este entorno usa solo permisos delegados.';
+
+const POST_CREATE_ATTACHMENT_DELAY_MS = 500;
+
+async function delayMs(ms: number): Promise<void> {
+  await new Promise((resolve) => {
+    globalThis.setTimeout(resolve, ms);
+  });
+}
 
 function delegatedGraphCreateErrorMessage(graphError: unknown): string {
   const detail =
@@ -511,37 +521,93 @@ class LiveSharePointService implements SharePointDataService {
 
   async createRecord(record: CreateRecordInput): Promise<MachineRecord> {
     const { attachmentFiles, ...recordFields } = record;
+    const files = attachmentFiles;
     const normalized = normalizeCreateRecordInput(recordFields);
-    const hasNativeAttachmentFiles = Boolean(attachmentFiles?.length);
+    const hasFiles = Boolean(files?.length);
+
+    const ctx = await resolveGraphListContext();
+    let sharePointRestToken: string | null = null;
+    if (hasFiles && ctx) {
+      await authService.initializeAuth();
+      sharePointRestToken = await authService.acquireSharePointAccessToken(ctx.siteUrl);
+    }
+    const useClientRestForAttachments = Boolean(hasFiles && ctx && sharePointRestToken);
 
     /**
-     * Adjuntos en la columna nativa Attachments de SharePoint: usar siempre POST /api/ishikawa + REST
-     * (AttachmentFiles/add). Microsoft Graph POST .../items/{id}/attachments suele no persistir o no estar
-     * soportado de forma equivalente en muchos tenants; el servidor ya sube binarios con credenciales de app.
+     * Sin token REST del sitio: mismo JSON + base64 que /api/ishikawa (credenciales de aplicación en servidor).
+     * Con token: crear ítem (Graph o API), esperar, subir cada File por SharePoint REST (binario), como en VehicleFormReal.
      */
-    if (!hasNativeAttachmentFiles) {
+    if (hasFiles && !useClientRestForAttachments) {
+      const payloads = await filesToAttachmentPayloads(files!);
+      const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
+        method: 'POST',
+        body: JSON.stringify({ record: normalized, attachmentFiles: payloads }),
+      });
+      this.invalidateCaches();
+      return normalizeRecord(response.record);
+    }
+
+    if (!hasFiles) {
       const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized);
       if (graphRecord) {
         this.invalidateCaches();
         return normalizeRecord(graphRecord);
       }
+      const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
+        method: 'POST',
+        body: JSON.stringify({ record: normalized }),
+      });
+      this.invalidateCaches();
+      return normalizeRecord(response.record);
     }
 
-    const payload: {
-      record: MachineRecordWithoutMeta;
-      attachmentFiles?: AttachmentFilePayload[];
-    } = { record: normalized };
-    if (attachmentFiles?.length) {
-      payload.attachmentFiles = attachmentFiles;
+    let created: MachineRecord;
+    const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized);
+    if (graphRecord) {
+      created = graphRecord;
+    } else {
+      const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
+        method: 'POST',
+        body: JSON.stringify({ record: normalized }),
+      });
+      created = normalizeRecord(response.record);
     }
 
-    const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    await delayMs(POST_CREATE_ATTACHMENT_DELAY_MS);
+    for (const file of files!) {
+      try {
+        await uploadListItemAttachmentRest({
+          siteUrl: ctx!.siteUrl,
+          listTitle: ctx!.listName,
+          itemId: created.id,
+          file,
+          accessToken: sharePointRestToken!,
+        });
+      } catch (uploadErr) {
+        const detail = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+        throw new Error(
+          `El registro se creó (id ${created.id}) pero falló la subida de adjuntos por SharePoint REST. ${detail} Si el error es de red o CORS, configura el token del sitio en Azure o usa el envío por API sin sesión.`
+        );
+      }
+    }
 
     this.invalidateCaches();
-    return normalizeRecord(response.record);
+    const graphAccess = await authService.acquireGraphAccessToken();
+    if (graphAccess && ctx) {
+      try {
+        const refreshed = await loadGraphListItemAsMachineRecord({
+          siteUrl: ctx.siteUrl,
+          listName: ctx.listName,
+          fieldMap: getClientFieldMap(),
+          accessToken: graphAccess,
+          itemId: created.id,
+        });
+        return normalizeRecord(refreshed);
+      } catch {
+        /* Adjuntos ya en lista; la siguiente carga de datos los mostrará */
+      }
+    }
+    return normalizeRecord(created);
   }
 
   async getKPIs(): Promise<KPIData> {
@@ -619,6 +685,9 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 async function extractHttpError(response: Response): Promise<string> {
+  if (response.status === 413) {
+    return 'El tamaño del envío supera el límite del servidor (p. ej. ~4,5 MB por solicitud en Vercel). Usa archivos más pequeños o menos adjuntos por registro.';
+  }
   try {
     const body = (await response.json()) as { message?: unknown };
     if (typeof body.message === 'string' && body.message.trim()) {
@@ -656,7 +725,7 @@ function sortActivities(activities: Activity[]): Activity[] {
 
 function toMockCreateRecordPayload(
   record: CreateRecordInput
-): MachineRecordWithoutMeta & { attachmentFiles?: AttachmentFilePayload[] } {
+): MachineRecordWithoutMeta & { attachmentFiles?: File[] } {
   const { attachmentFiles, ...recordFields } = record;
   const normalized = normalizeCreateRecordInput(recordFields);
   return { ...normalized, attachmentFiles };

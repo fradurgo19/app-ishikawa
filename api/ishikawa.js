@@ -73,6 +73,21 @@ async function writeRecordsListResponse(req, res, sharePointConfigResolved) {
   sendJson(res, 200, { records: filteredRecords });
 }
 
+/** SharePoint REST puede devolver Id en raíz o bajo d (formato clásico). */
+function extractCreatedListItemId(createdItem) {
+  if (!createdItem || typeof createdItem !== 'object') {
+    return undefined;
+  }
+  return (
+    createdItem.Id ??
+    createdItem.ID ??
+    createdItem.id ??
+    createdItem.d?.Id ??
+    createdItem.d?.ID ??
+    createdItem.d?.id
+  );
+}
+
 async function writeCreatedRecordResponse(req, res, sharePointConfigResolved) {
   const requestBody = parseRequestBody(req.body);
   const incomingRecord = requestBody.record;
@@ -87,7 +102,7 @@ async function writeCreatedRecordResponse(req, res, sharePointConfigResolved) {
   }
 
   const createdItem = await createListItem(sharePointConfigResolved, payload);
-  const itemId = createdItem.Id ?? createdItem.ID ?? createdItem.id;
+  const itemId = extractCreatedListItemId(createdItem);
   if (attachmentFiles.length > 0) {
     if (itemId === undefined || itemId === null || itemId === '') {
       throw createHttpError(502, 'List item created without id; cannot upload attachments');

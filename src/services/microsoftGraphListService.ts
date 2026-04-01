@@ -254,6 +254,28 @@ export async function createSharePointListItemViaMicrosoftGraph(options: {
   return mapGraphListItemToMachineRecord(expanded, fieldMap, nativeList);
 }
 
+/** Recarga un ítem (p. ej. tras subir adjuntos por SharePoint REST) para devolver attachments vía Graph. */
+export async function loadGraphListItemAsMachineRecord(options: {
+  siteUrl: string;
+  listName: string;
+  fieldMap: ClientFieldMap;
+  accessToken: string;
+  itemId: string;
+}): Promise<MachineRecord> {
+  const { siteUrl, listName, fieldMap, accessToken, itemId } = options;
+  const siteId = await resolveGraphSiteId(siteUrl, accessToken);
+  const listId = await resolveGraphListId(siteId, listName, accessToken);
+  const encodedId = encodeURIComponent(itemId);
+  const expanded = await graphRequestJson<GraphListItem>(
+    `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${encodedId}?$expand=fields`,
+    accessToken
+  );
+  const nativeList = await fetchGraphListItemAttachments(siteId, listId, itemId, accessToken).catch(
+    () => [] as Attachment[]
+  );
+  return mapGraphListItemToMachineRecord(expanded, fieldMap, nativeList);
+}
+
 export async function resolveGraphSiteId(siteUrl: string, accessToken: string): Promise<string> {
   const normalized = siteUrl.replace(/\/$/, '');
   const url = new URL(normalized);

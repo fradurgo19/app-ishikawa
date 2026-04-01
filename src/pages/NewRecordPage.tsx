@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Button } from '../atoms/Button';
@@ -7,7 +7,6 @@ import { Textarea } from '../atoms/Textarea';
 import { Select } from '../atoms/Select';
 import { Card } from '../atoms/Card';
 import { sharePointService } from '../services/sharePointService';
-import { filesToAttachmentPayloads } from '../utils/attachmentFilePayload';
 import { Section, ActivityType } from '../types';
 import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 
@@ -64,12 +63,17 @@ const NewRecordAttachmentsField: React.FC<NewRecordAttachmentsFieldProps> = ({
   onAppendFiles,
   onRemoveAt,
 }) => {
+  const fileInputId = useId();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onAppendFiles(e.target.files);
     e.target.value = '';
   };
 
-  const fileInputId = 'new-record-attachments';
+  const handlePickFilesClick = () => {
+    fileInputRef.current?.click();
+  };
 
   let attachmentSummaryText: string;
   if (stagedFiles.length === 0) {
@@ -80,28 +84,38 @@ const NewRecordAttachmentsField: React.FC<NewRecordAttachmentsFieldProps> = ({
   }
 
   return (
-    <div className="space-y-2">
-      <span className="block text-sm font-medium text-gray-700">Adjuntos</span>
-      <p className="text-xs text-gray-500">
-        Fotos o documentos (varios archivos). Se guardan en la columna nativa Attachments de SharePoint.
+    <div className="space-y-2 md:col-span-2">
+      <label htmlFor={fileInputId} className="block text-sm font-medium text-gray-700 mb-1">
+        Adjuntos (fotos / archivos)
+      </label>
+      <p className="text-xs text-gray-500 mb-2">
+        Imágenes, PDF u Office. Se acumulan en la lista y, al guardar, se suben a la columna nativa Attachments
+        (SharePoint REST tras crear el registro), igual que en el formulario de equipo.
       </p>
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          id={fileInputId}
-          type="file"
-          multiple
-          className="sr-only"
-          onChange={handleFileInputChange}
-        />
-        <label
-          htmlFor={fileInputId}
-          className="inline-flex cursor-pointer items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
-        >
-          Elegir archivos
-        </label>
-        <span className="text-sm text-gray-600" aria-live="polite">
-          {attachmentSummaryText}
-        </span>
+      <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 transition-colors hover:border-red-400">
+        <div className="flex flex-col items-center justify-center gap-3 sm:flex-row sm:flex-wrap">
+          <input
+            id={fileInputId}
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+            className="hidden"
+            tabIndex={-1}
+            onChange={handleFileInputChange}
+          />
+          <button
+            type="button"
+            className="inline-flex cursor-pointer items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+            onClick={handlePickFilesClick}
+            aria-label="Elegir archivos para adjuntar al registro"
+          >
+            Elegir archivos
+          </button>
+          <span className="text-sm text-gray-600 text-center sm:text-left" aria-live="polite">
+            {attachmentSummaryText}
+          </span>
+        </div>
       </div>
       {stagedFiles.length > 0 && (
         <ul className="mt-2 space-y-1 rounded-md border border-gray-200 bg-white p-2 text-sm">
@@ -188,21 +202,10 @@ export const NewRecordPage: React.FC = () => {
     async (data: FormData) => {
       setLoading(true);
       try {
-        let attachmentFiles: Awaited<ReturnType<typeof filesToAttachmentPayloads>> | undefined;
-        if (stagedFiles.length > 0) {
-          try {
-            attachmentFiles = await filesToAttachmentPayloads(stagedFiles);
-          } catch (fileErr) {
-            const msg = fileErr instanceof Error ? fileErr.message : 'No se pudieron leer los adjuntos';
-            alert(msg);
-            return;
-          }
-        }
-
         await sharePointService.createRecord({
           ...data,
           createdBy: DEFAULT_CREATED_BY_USER_ID,
-          ...(attachmentFiles?.length ? { attachmentFiles } : {}),
+          ...(stagedFiles.length > 0 ? { attachmentFiles: stagedFiles } : {}),
         });
 
         alert('¡Registro creado exitosamente!');
