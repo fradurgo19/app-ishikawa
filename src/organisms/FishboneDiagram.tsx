@@ -115,7 +115,8 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
     <div className="bg-white rounded-lg p-6 shadow-md">
       <h2 className="text-2xl font-bold text-gray-900 mb-4">Diagrama Ishikawa</h2>
       <p className="text-sm text-gray-600 mb-6">
-        Marca y modelo se despliegan hacia abajo; desde sección y problema, las ramas alternan arriba y abajo como espina clásica.
+        Tras elegir marca, los modelos alternan arriba y abajo de la espina; todo lo que cuelga de un modelo (secciones,
+        problemas, actividades…) sigue la misma dirección que ese modelo.
       </p>
       <div className="overflow-x-auto overflow-y-visible pb-8 pt-4">
         {fishboneData.length > 0 ? (
@@ -163,17 +164,20 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
 };
 
 /**
- * Por defecto alterna arriba/abajo (espina clásica).
- * Marca → modelos y modelo → secciones solo hacia abajo, para que el despliegue siga la lectura vertical esperada.
+ * Sin dirección heredada (nodo marca en la espina): los hijos alternan arriba/abajo.
+ * Con dirección heredada: las ramas bajo una columna superior o inferior repiten el mismo lado que el modelo padre.
  */
 function splitChildrenIntoUpperAndLowerRibs(
   children: FishboneNode[],
-  parentType: FishboneNode['type']
+  inheritedRib?: 'upper' | 'lower'
 ): {
   upper: FishboneNode[];
   lower: FishboneNode[];
 } {
-  if (parentType === 'marca' || parentType === 'modelo') {
+  if (inheritedRib === 'upper') {
+    return { upper: [...children], lower: [] };
+  }
+  if (inheritedRib === 'lower') {
     return { upper: [], lower: [...children] };
   }
 
@@ -191,6 +195,8 @@ function splitChildrenIntoUpperAndLowerRibs(
 
 interface FishboneBranchProps {
   node: FishboneNode;
+  /** Desde qué lado de la espina cuelga esta rama; sus hijos repiten el mismo lado. */
+  inheritedRib?: 'upper' | 'lower';
   onToggle: (nodeId: string) => void;
   getNodeColor: (type: FishboneNode['type']) => string;
   getNodeIcon: (type: FishboneNode['type']) => LucideIcon | null;
@@ -219,6 +225,7 @@ function FishboneRibColumn({
     <div className="max-w-[220px]">
       <FishboneBranch
         node={child}
+        inheritedRib={placement}
         onToggle={onToggle}
         getNodeColor={getNodeColor}
         getNodeIcon={getNodeIcon}
@@ -244,9 +251,9 @@ function FishboneRibColumn({
   );
 }
 
-function FishboneBranch({ node, onToggle, getNodeColor, getNodeIcon }: FishboneBranchProps) {
+function FishboneBranch({ node, inheritedRib, onToggle, getNodeColor, getNodeIcon }: FishboneBranchProps) {
   const hasChildren = node.children.length > 0;
-  const { upper, lower } = splitChildrenIntoUpperAndLowerRibs(node.children, node.type);
+  const { upper, lower } = splitChildrenIntoUpperAndLowerRibs(node.children, inheritedRib);
   const Icon = getNodeIcon(node.type);
 
   return (
