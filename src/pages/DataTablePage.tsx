@@ -1,17 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Button } from '../atoms/Button';
 import { Input } from '../atoms/Input';
 import { Select } from '../atoms/Select';
 import { sharePointService } from '../services/sharePointService';
-import { MachineRecord, Brand, Model, ActivityType, Activity } from '../types';
+import { MachineRecord, Brand, Model, ActivityType, Activity, Attachment } from '../types';
 import {
   getDistinctTiposEquipo,
   getMarcasForTipoEquipo,
   getModelosForTipoYMarca,
 } from '../data/equipmentMatrix';
 import { resolveActivityDisplayLabel } from '../utils/resolveActivityDisplayLabel';
-import { ArrowLeft, Download, Filter } from 'lucide-react';
+import { ArrowLeft, Download, Filter, GitBranch } from 'lucide-react';
 
 interface DataTableFilters {
   tipoEquipoId: string;
@@ -246,25 +246,52 @@ export const DataTablePage: React.FC = () => {
             <table className="w-full">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Tipo equipo
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Marca / Modelo
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Problema
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Actividad
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Recurso
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Tiempo
                   </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
+                    Adjuntos
+                  </th>
+                  <th
+                    scope="col"
+                    className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                  >
                     Acciones
                   </th>
                 </tr>
@@ -302,33 +329,11 @@ export const DataTablePage: React.FC = () => {
                         {record.time}m
                       </span>
                     </td>
+                    <td className="px-6 py-4 align-top">
+                      <RecordAttachmentsCell attachments={resolveRecordAttachments(record)} />
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {(() => {
-                        const atts = record.attachments?.length
-                          ? record.attachments
-                          : record.attachment
-                            ? [record.attachment]
-                            : [];
-                        if (!atts.length) {
-                          return <span className="text-sm text-gray-400">—</span>;
-                        }
-                        return (
-                          <div className="flex flex-col gap-1 max-w-[14rem]">
-                            {atts.map((att) => (
-                              <a
-                                key={att.id}
-                                href={att.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline truncate"
-                              >
-                                <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                                <span className="truncate">{att.name}</span>
-                              </a>
-                            ))}
-                          </div>
-                        );
-                      })()}
+                      <RecordActionsCell record={record} />
                     </td>
                   </tr>
                 ))}
@@ -344,6 +349,100 @@ export const DataTablePage: React.FC = () => {
         </div>
       </div>
     </div>
+  );
+};
+
+function resolveRecordAttachments(record: MachineRecord): Attachment[] {
+  if (record.attachments && record.attachments.length > 0) {
+    return record.attachments;
+  }
+  if (record.attachment) {
+    return [record.attachment];
+  }
+  return [];
+}
+
+interface RecordAttachmentsCellProps {
+  attachments: Attachment[];
+}
+
+const RecordAttachmentsCell: React.FC<RecordAttachmentsCellProps> = ({ attachments }) => {
+  if (attachments.length === 0) {
+    return <span className="text-sm text-gray-400">—</span>;
+  }
+
+  return (
+    <ul className="m-0 max-w-[16rem] list-none space-y-1 p-0">
+      {attachments.map((att, index) => {
+        const href = att.url?.trim();
+        const trimmedName = att.name?.trim();
+        let label = 'Adjunto';
+        if (trimmedName) {
+          label = trimmedName;
+        }
+        const key = `${att.id}-${index}`;
+        if (!href) {
+          return (
+            <li key={key}>
+              <span className="text-sm text-gray-600" title={label}>
+                {label}
+              </span>
+            </li>
+          );
+        }
+        return (
+          <li key={key}>
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex max-w-full items-center gap-1 text-sm text-blue-600 hover:underline"
+            >
+              <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span className="truncate" title={label}>
+                {label}
+              </span>
+            </a>
+          </li>
+        );
+      })}
+    </ul>
+  );
+};
+
+interface RecordActionsCellProps {
+  record: MachineRecord;
+}
+
+const RecordActionsCell: React.FC<RecordActionsCellProps> = ({ record }) => {
+  const params = new URLSearchParams();
+  if (record.tipoEquipoId.trim()) {
+    params.set('tipoEquipo', record.tipoEquipoId);
+  }
+  if (record.brandId.trim()) {
+    params.set('brand', record.brandId);
+  }
+  if (record.modelId.trim()) {
+    params.set('model', record.modelId);
+  }
+  if (record.problem.trim()) {
+    params.set('problem', record.problem);
+  }
+  const search = params.toString();
+  const fishboneBase = '/fishbone';
+  let to = fishboneBase;
+  if (search.length > 0) {
+    to = `${fishboneBase}?${search}`;
+  }
+
+  return (
+    <Link
+      to={to}
+      className="inline-flex items-center gap-1 text-sm font-medium text-red-700 hover:text-red-900 hover:underline"
+    >
+      <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      Diagrama
+    </Link>
   );
 };
 

@@ -22,6 +22,7 @@ export const SelectorCard: React.FC<SelectorCardProps> = ({
       className={`p-6 ${selected ? 'ring-2 ring-red-500 bg-red-50' : ''}`}
       onClick={onClick}
       hover
+      aria-pressed={selected}
     >
       <div className="text-center">
         <div className={`inline-flex p-4 rounded-full ${selected ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'}`}>

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SelectorCard } from '../molecules/SelectorCard';
 import { KPICard } from '../molecules/KPICard';
@@ -24,6 +24,12 @@ export const SelectorPage: React.FC = () => {
   const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedModel, setSelectedModel] = useState('');
   const [problemSearch, setProblemSearch] = useState('');
+
+  const criteriosRef = useRef<HTMLElement>(null);
+  const tipoSelectRef = useRef<HTMLSelectElement>(null);
+  const brandSelectRef = useRef<HTMLSelectElement>(null);
+  const modelSelectRef = useRef<HTMLSelectElement>(null);
+  const problemInputRef = useRef<HTMLInputElement>(null);
 
   const navigate = useNavigate();
 
@@ -95,6 +101,44 @@ export const SelectorPage: React.FC = () => {
 
   const canViewFishbone = Boolean(problemSearch || matrixComboValid);
 
+  const scrollCriteriosAndRun = useCallback((action: () => void) => {
+    queueMicrotask(() => {
+      criteriosRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      action();
+    });
+  }, []);
+
+  const handleBrandCardClick = useCallback(() => {
+    setSelectedCard('brand');
+    scrollCriteriosAndRun(() => {
+      if (selectedTipoEquipo) {
+        brandSelectRef.current?.focus();
+      } else {
+        tipoSelectRef.current?.focus();
+      }
+    });
+  }, [scrollCriteriosAndRun, selectedTipoEquipo]);
+
+  const handleModelCardClick = useCallback(() => {
+    setSelectedCard('model');
+    scrollCriteriosAndRun(() => {
+      if (selectedTipoEquipo && selectedBrand) {
+        modelSelectRef.current?.focus();
+      } else if (selectedTipoEquipo) {
+        brandSelectRef.current?.focus();
+      } else {
+        tipoSelectRef.current?.focus();
+      }
+    });
+  }, [scrollCriteriosAndRun, selectedBrand, selectedTipoEquipo]);
+
+  const handleProblemCardClick = useCallback(() => {
+    setSelectedCard('problem');
+    scrollCriteriosAndRun(() => {
+      problemInputRef.current?.focus();
+    });
+  }, [scrollCriteriosAndRun]);
+
   return (
     <div className="min-h-screen w-full bg-gray-50">
       <div className="w-full px-4 sm:px-6 lg:px-8 py-8">
@@ -143,30 +187,31 @@ export const SelectorPage: React.FC = () => {
             title="Marca"
             description="Según tipo de equipo seleccionado"
             icon={Factory}
-            onClick={() => setSelectedCard('brand')}
+            onClick={handleBrandCardClick}
             selected={selectedCard === 'brand'}
           />
           <SelectorCard
             title="Modelo"
             description="Combinación válida marca / modelo"
             icon={Settings}
-            onClick={() => setSelectedCard('model')}
+            onClick={handleModelCardClick}
             selected={selectedCard === 'model'}
           />
           <SelectorCard
             title="Problema"
             description="Busca por descripción del problema"
             icon={AlertTriangle}
-            onClick={() => setSelectedCard('problem')}
+            onClick={handleProblemCardClick}
             selected={selectedCard === 'problem'}
           />
         </div>
 
-        <div className="bg-white rounded-lg p-6 shadow-md mb-8">
+        <section ref={criteriosRef} className="bg-white rounded-lg p-6 shadow-md mb-8" aria-label="Criterios de filtro">
           <h2 className="text-xl font-semibold text-gray-900 mb-6">Criterios de Filtro</h2>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
             <Select
+              ref={tipoSelectRef}
               label="Tipo de equipo"
               options={tiposOptions}
               value={selectedTipoEquipo}
@@ -179,6 +224,7 @@ export const SelectorPage: React.FC = () => {
             />
 
             <Select
+              ref={brandSelectRef}
               label="Marca"
               options={marcasOptions}
               value={selectedBrand}
@@ -191,6 +237,7 @@ export const SelectorPage: React.FC = () => {
             />
 
             <Select
+              ref={modelSelectRef}
               label="Modelo"
               options={modelosOptions}
               value={selectedModel}
@@ -200,6 +247,7 @@ export const SelectorPage: React.FC = () => {
             />
 
             <Input
+              ref={problemInputRef}
               label="Búsqueda de Problemas"
               type="text"
               value={problemSearch}
@@ -235,7 +283,7 @@ export const SelectorPage: React.FC = () => {
               Crear Nuevo Registro
             </Button>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );
