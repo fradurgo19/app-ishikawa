@@ -115,7 +115,7 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
     <div className="bg-white rounded-lg p-6 shadow-md">
       <h2 className="text-2xl font-bold text-gray-900 mb-4">Diagrama Ishikawa</h2>
       <p className="text-sm text-gray-600 mb-6">
-        Espina horizontal: las causas se abren hacia arriba y hacia abajo, en alternancia.
+        Marca y modelo se despliegan hacia abajo; desde sección y problema, las ramas alternan arriba y abajo como espina clásica.
       </p>
       <div className="overflow-x-auto overflow-y-visible pb-8 pt-4">
         {fishboneData.length > 0 ? (
@@ -162,10 +162,21 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
   );
 };
 
-function splitChildrenIntoUpperAndLowerRibs(children: FishboneNode[]): {
+/**
+ * Por defecto alterna arriba/abajo (espina clásica).
+ * Marca → modelos y modelo → secciones solo hacia abajo, para que el despliegue siga la lectura vertical esperada.
+ */
+function splitChildrenIntoUpperAndLowerRibs(
+  children: FishboneNode[],
+  parentType: FishboneNode['type']
+): {
   upper: FishboneNode[];
   lower: FishboneNode[];
 } {
+  if (parentType === 'marca' || parentType === 'modelo') {
+    return { upper: [], lower: [...children] };
+  }
+
   const upper: FishboneNode[] = [];
   const lower: FishboneNode[] = [];
   children.forEach((child, index) => {
@@ -235,7 +246,7 @@ function FishboneRibColumn({
 
 function FishboneBranch({ node, onToggle, getNodeColor, getNodeIcon }: FishboneBranchProps) {
   const hasChildren = node.children.length > 0;
-  const { upper, lower } = splitChildrenIntoUpperAndLowerRibs(node.children);
+  const { upper, lower } = splitChildrenIntoUpperAndLowerRibs(node.children, node.type);
   const Icon = getNodeIcon(node.type);
 
   return (

@@ -49,7 +49,10 @@ export const FishbonePage: React.FC = () => {
             <div>
               <h3 className="font-medium text-gray-900 mb-2">Navegación</h3>
               <ul className="space-y-1">
-                <li>• Haz clic en un nodo con hijos para expandir; las causas se abren arriba y abajo en alternancia</li>
+                <li>
+                  • Haz clic en un nodo con hijos para expandir; marca y modelo abren hacia abajo; el resto alterna arriba y
+                  abajo
+                </li>
                 <li>• Diferentes colores representan diferentes tipos de datos</li>
                 <li>• Los iconos ayudan a identificar tipos de contenido específicos</li>
               </ul>
