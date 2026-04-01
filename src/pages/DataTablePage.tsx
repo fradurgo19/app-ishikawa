@@ -10,6 +10,7 @@ import {
   getMarcasForTipoEquipo,
   getModelosForTipoYMarca,
 } from '../data/equipmentMatrix';
+import { resolveActivityDisplayLabel } from '../utils/resolveActivityDisplayLabel';
 import { ArrowLeft, Download, Filter } from 'lucide-react';
 
 interface DataTableFilters {
@@ -110,9 +111,8 @@ export const DataTablePage: React.FC = () => {
     return activityTypes.find((at) => at.id === activityTypeId)?.name || 'Desconocido';
   };
 
-  const getActivityName = (activityId: string) => {
-    return activities.find((a) => a.id === activityId)?.name || 'Desconocido';
-  };
+  const getActivityName = (activityId: string) =>
+    resolveActivityDisplayLabel(activityId, activities);
 
   const handleFilterChange = (key: keyof DataTableFilters, value: string) => {
     setFilters((prev) => {
@@ -281,14 +281,16 @@ export const DataTablePage: React.FC = () => {
                       </div>
                       <div className="text-sm text-gray-500">{getModelName(record.modelId)}</div>
                     </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-gray-900 max-w-xs truncate">{record.problem}</div>
+                    <td className="px-6 py-4 align-top">
+                      <div className="text-sm text-gray-900 max-w-md whitespace-pre-wrap break-words">
+                        {record.problem}
+                      </div>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm text-gray-900">
+                    <td className="px-6 py-4 align-top">
+                      <div className="text-sm text-gray-900 whitespace-nowrap">
                         {getActivityTypeName(record.activityTypeId)}
                       </div>
-                      <div className="text-sm text-gray-500">
+                      <div className="text-sm text-gray-500 max-w-xs whitespace-pre-wrap break-words">
                         {getActivityName(record.activityId)}
                       </div>
                     </td>

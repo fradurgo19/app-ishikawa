@@ -11,6 +11,7 @@ import {
 } from '../types';
 import { sharePointService } from '../services/sharePointService';
 import { normalizeLabel } from '../data/equipmentMatrix';
+import { resolveActivityDisplayLabel } from '../utils/resolveActivityDisplayLabel';
 import { ChevronRight, ChevronDown, Clock, Paperclip, PenTool as Tool } from 'lucide-react';
 
 interface FishboneDiagramProps {
@@ -310,7 +311,7 @@ function FishboneNodeButton({
       {hasChildren &&
         (node.expanded ? <ChevronDown size={16} className="shrink-0" /> : <ChevronRight size={16} className="shrink-0" />)}
       {Icon && <Icon size={16} className="shrink-0" />}
-      <span className="font-medium break-words">{node.label}</span>
+      <span className="font-medium break-words whitespace-pre-wrap">{node.label}</span>
     </button>
   );
 }
@@ -560,8 +561,7 @@ function buildActivityTypeNode(
 }
 
 function buildActivityNode(record: MachineRecord, activities: Activity[]): FishboneNode {
-  const activityLabel =
-    activities.find((activity) => activity.id === record.activityId)?.name || 'Desconocido';
+  const activityLabel = resolveActivityDisplayLabel(record.activityId, activities);
 
   return {
     id: `activity-${record.id}`,

@@ -3,11 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Button } from '../atoms/Button';
 import { Input } from '../atoms/Input';
+import { Textarea } from '../atoms/Textarea';
 import { Select } from '../atoms/Select';
 import { Card } from '../atoms/Card';
 import { sharePointService } from '../services/sharePointService';
 import { filesToAttachmentPayloads } from '../utils/attachmentFilePayload';
-import { Section, ActivityType, Activity } from '../types';
+import { Section, ActivityType } from '../types';
 import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 
 interface FormData {
@@ -68,21 +69,40 @@ const NewRecordAttachmentsField: React.FC<NewRecordAttachmentsFieldProps> = ({
     e.target.value = '';
   };
 
+  const fileInputId = 'new-record-attachments';
+
+  let attachmentSummaryText: string;
+  if (stagedFiles.length === 0) {
+    attachmentSummaryText = 'Aún no hay archivos en la lista';
+  } else {
+    const pluralSuffix = stagedFiles.length === 1 ? '' : 's';
+    attachmentSummaryText = `${stagedFiles.length} archivo${pluralSuffix} en la lista (puedes añadir más)`;
+  }
+
   return (
     <div className="space-y-2">
-      <label className="block text-sm font-medium text-gray-700" htmlFor="new-record-attachments">
-        Adjuntos
-      </label>
+      <span className="block text-sm font-medium text-gray-700">Adjuntos</span>
       <p className="text-xs text-gray-500">
         Fotos o documentos (varios archivos). Se guardan en la columna nativa Attachments de SharePoint.
       </p>
-      <input
-        id="new-record-attachments"
-        type="file"
-        multiple
-        className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border file:border-gray-300 file:bg-white file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-50"
-        onChange={handleFileInputChange}
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          id={fileInputId}
+          type="file"
+          multiple
+          className="sr-only"
+          onChange={handleFileInputChange}
+        />
+        <label
+          htmlFor={fileInputId}
+          className="inline-flex cursor-pointer items-center rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+        >
+          Elegir archivos
+        </label>
+        <span className="text-sm text-gray-600" aria-live="polite">
+          {attachmentSummaryText}
+        </span>
+      </div>
       {stagedFiles.length > 0 && (
         <ul className="mt-2 space-y-1 rounded-md border border-gray-200 bg-white p-2 text-sm">
           {stagedFiles.map((file, index) => (
@@ -112,7 +132,6 @@ export const NewRecordPage: React.FC = () => {
 
   const [sections, setSections] = useState<Section[]>([]);
   const [activityTypes, setActivityTypes] = useState<ActivityType[]>([]);
-  const [activities, setActivities] = useState<Activity[]>([]);
   const [tiposOptions, setTiposOptions] = useState<{ value: string; label: string }[]>([]);
   const [marcasOptions, setMarcasOptions] = useState<{ value: string; label: string }[]>([]);
   const [modelosOptions, setModelosOptions] = useState<{ value: string; label: string }[]>([]);
@@ -141,18 +160,16 @@ export const NewRecordPage: React.FC = () => {
     setLoadError(null);
     try {
       await sharePointService.refreshDictionary?.();
-      const [equipment, activityTypesData, sectionsData, activitiesData] = await Promise.all([
+      const [equipment, activityTypesData, sectionsData] = await Promise.all([
         sharePointService.getNewRecordEquipmentSelectOptions(),
         sharePointService.getActivityTypes(),
         sharePointService.getSectionOptionsForNewRecord(),
-        sharePointService.getActivityOptionsForNewRecord(),
       ]);
       setTiposOptions(toSelectOptions(equipment.tipos));
       setMarcasOptions(toSelectOptions(equipment.marcas));
       setModelosOptions(toSelectOptions(equipment.modelos));
       setActivityTypes(activityTypesData);
       setSections(sectionsData);
-      setActivities(activitiesData);
     } catch (error) {
       console.error('Error cargando datos iniciales:', error);
       const message =
@@ -275,10 +292,10 @@ export const NewRecordPage: React.FC = () => {
               error={errors.sectionId?.message}
             />
 
-            <Input
+            <Textarea
               label="Descripción del Problema *"
-              type="text"
-              placeholder="Describe el problema o incidencia"
+              rows={5}
+              placeholder="Describe el problema o incidencia (puedes usar varias líneas)"
               {...register('problem', { required: 'La descripción del problema es requerida' })}
               error={errors.problem?.message}
             />
@@ -294,11 +311,10 @@ export const NewRecordPage: React.FC = () => {
                 error={errors.activityTypeId?.message}
               />
 
-              <Select
+              <Textarea
                 label="Actividad *"
-                options={activities.map((a) => ({ value: a.id, label: a.name }))}
-                placeholder="Selecciona actividad"
-                disabled={selectOptionsLoading}
+                rows={4}
+                placeholder="Describe la actividad realizada (texto libre, varias líneas si lo necesitas)"
                 {...register('activityId', { required: 'La actividad es requerida' })}
                 error={errors.activityId?.message}
               />
