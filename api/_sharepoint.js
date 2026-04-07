@@ -297,6 +297,39 @@ export async function createListItem(config, payload) {
   });
 }
 
+/** Actualiza campos del ítem (MERGE); mismo payload que createListItem. */
+export async function mergeListItem(config, itemId, payload) {
+  const accessToken = await getAccessToken(config);
+  const encodedListTitle = escapeODataString(config.listTitle);
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw createHttpError(400, 'Invalid list item id');
+  }
+  const url = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items(${id})`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json;odata=nometadata',
+      'Content-Type': 'application/json;odata=nometadata',
+      'X-HTTP-Method': 'MERGE',
+      'IF-MATCH': '*',
+    },
+    body: JSON.stringify(payload),
+  });
+  const responsePayload = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(502, 'SharePoint merge request failed', {
+      status: response.status,
+      statusText: response.statusText,
+      response: responsePayload,
+      request: { method: 'MERGE', url },
+      listTitle: config.listTitle,
+    });
+  }
+  return responsePayload;
+}
+
 export async function fetchListItemById(config, itemId, options = {}) {
   const expandAttachmentFiles = options.expandAttachmentFiles !== false;
   const accessToken = await getAccessToken(config);

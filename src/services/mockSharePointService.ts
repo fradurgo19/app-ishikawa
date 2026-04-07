@@ -180,6 +180,20 @@ class MockSharePointService {
     return newRecord;
   }
 
+  async updateRecord(record: MachineRecord): Promise<MachineRecord> {
+    await this.delay(400);
+    const idx = mockRecords.findIndex((r) => r.id === record.id);
+    if (idx < 0) {
+      throw new Error('No se encontró el registro a actualizar.');
+    }
+    const updated: MachineRecord = {
+      ...record,
+      updatedAt: new Date().toISOString(),
+    };
+    mockRecords[idx] = updated;
+    return updated;
+  }
+
   async getKPIs(): Promise<KPIData> {
     await this.delay(200);
     const tipos = new Set(mockRecords.map((r) => r.tipoEquipoId).filter(Boolean));

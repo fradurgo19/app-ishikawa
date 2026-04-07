@@ -72,6 +72,27 @@ async function graphRequestJson<T>(
   return (await response.json()) as T;
 }
 
+/** PATCH que puede responder sin cuerpo JSON. */
+async function graphRequestPatch(
+  url: string,
+  accessToken: string,
+  body: Record<string, unknown>
+): Promise<void> {
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(graphHttpErrorMessage(response.status, text));
+  }
+}
+
 /** Misma forma que el payload del API (sin id ni fechas de servidor). */
 export type GraphCreateRecordInput = Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -369,6 +390,32 @@ export async function createSharePointListItemViaMicrosoftGraph(options: {
   ).catch(() => [] as Attachment[]);
 
   return mapGraphListItemToMachineRecord(expanded, fieldMap, nativeList);
+}
+
+/** Actualiza campos del ítem de lista vía Microsoft Graph (PATCH .../items/{id}). */
+export async function updateSharePointListItemViaMicrosoftGraph(options: {
+  siteUrl: string;
+  listName: string;
+  fieldMap: ClientFieldMap;
+  accessToken: string;
+  itemId: string;
+  record: GraphCreateRecordInput;
+}): Promise<MachineRecord> {
+  const { siteUrl, listName, fieldMap, accessToken, itemId, record } = options;
+  const siteId = await resolveGraphSiteId(siteUrl, accessToken);
+  const listId = await resolveGraphListId(siteId, listName, accessToken);
+  const encodedId = encodeURIComponent(itemId);
+  const fieldsPayload = buildGraphListItemFields(record, fieldMap);
+  const patchUrl = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${encodedId}`;
+  await graphRequestPatch(patchUrl, accessToken, { fields: fieldsPayload });
+  return loadGraphListItemAsMachineRecord({
+    siteUrl,
+    listName,
+    fieldMap,
+    accessToken,
+    itemId,
+    sharePointAccessToken: null,
+  });
 }
 
 /** Recarga un ítem (p. ej. tras subir adjuntos por SharePoint REST) para devolver attachments vía Graph. */

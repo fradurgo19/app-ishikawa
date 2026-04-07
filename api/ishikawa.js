@@ -10,6 +10,7 @@ import {
   getSharePointConfig,
   mapListItemToMachineRecord,
   mergeFieldChoiceOptionsFromRecordsAndDictionary,
+  mergeListItem,
   resolveFieldMapWithListSchema,
   sanitizeAttachmentContentBase64,
   stripCustomAttachmentFieldsFromPayload,
@@ -122,6 +123,28 @@ async function writeCreatedRecordResponse(req, res, sharePointConfigResolved) {
   sendJson(res, 201, { record: createdRecord });
 }
 
+async function writeUpdatedRecordResponse(req, res, sharePointConfigResolved) {
+  enforceMethod(req.method, ['PATCH']);
+  const requestBody = parseRequestBody(req.body);
+  const incomingRecord = requestBody.record;
+  if (!incomingRecord || typeof incomingRecord !== 'object') {
+    throw createHttpError(400, 'Request body must include a "record" object');
+  }
+  const rawId = incomingRecord.id;
+  if (rawId === undefined || rawId === null || String(rawId).trim() === '') {
+    throw createHttpError(400, 'Request body.record must include id');
+  }
+  const payload = buildRecordPayload(incomingRecord, sharePointConfigResolved.fieldMap);
+  await mergeListItem(sharePointConfigResolved, rawId, payload);
+  const reloadedItem = await fetchListItemById(sharePointConfigResolved, rawId);
+  const updatedRecord = mapListItemToMachineRecord(
+    reloadedItem,
+    sharePointConfigResolved.fieldMap,
+    sharePointConfigResolved.siteOrigin
+  );
+  sendJson(res, 200, { record: updatedRecord });
+}
+
 export default async function handler(req, res) {
   setJsonHeaders(res);
 
@@ -154,6 +177,11 @@ export default async function handler(req, res) {
 
     if (requestedResource === 'records' && req.method === 'POST') {
       await writeCreatedRecordResponse(req, res, sharePointConfigResolved);
+      return;
+    }
+
+    if (requestedResource === 'records' && req.method === 'PATCH') {
+      await writeUpdatedRecordResponse(req, res, sharePointConfigResolved);
       return;
     }
 

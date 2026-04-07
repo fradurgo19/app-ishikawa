@@ -11,7 +11,8 @@ import {
   getModelosForTipoYMarca,
 } from '../data/equipmentMatrix';
 import { resolveActivityDisplayLabel } from '../utils/resolveActivityDisplayLabel';
-import { ArrowLeft, Download, Filter, GitBranch } from 'lucide-react';
+import { ArrowLeft, Download, Filter, GitBranch, Pencil } from 'lucide-react';
+import { EditRecordModal } from '../molecules/EditRecordModal';
 
 interface DataTableFilters {
   tipoEquipoId: string;
@@ -44,6 +45,7 @@ export const DataTablePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const [filters, setFilters] = useState<DataTableFilters>(INITIAL_FILTERS);
+  const [editingRecord, setEditingRecord] = useState<MachineRecord | null>(null);
 
   const tiposFilterOptions = useMemo(
     () => getDistinctTiposEquipo().map((t) => ({ value: t, label: t })),
@@ -333,7 +335,7 @@ export const DataTablePage: React.FC = () => {
                       <RecordAttachmentsCell attachments={resolveRecordAttachments(record)} />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <RecordActionsCell record={record} />
+                      <RecordActionsCell record={record} onEdit={setEditingRecord} />
                     </td>
                   </tr>
                 ))}
@@ -347,6 +349,15 @@ export const DataTablePage: React.FC = () => {
             </div>
           )}
         </div>
+
+        <EditRecordModal
+          isOpen={editingRecord !== null}
+          record={editingRecord}
+          onClose={() => setEditingRecord(null)}
+          onSaved={() => {
+            void loadData();
+          }}
+        />
       </div>
     </div>
   );
@@ -412,9 +423,10 @@ const RecordAttachmentsCell: React.FC<RecordAttachmentsCellProps> = ({ attachmen
 
 interface RecordActionsCellProps {
   record: MachineRecord;
+  onEdit: (record: MachineRecord) => void;
 }
 
-const RecordActionsCell: React.FC<RecordActionsCellProps> = ({ record }) => {
+const RecordActionsCell: React.FC<RecordActionsCellProps> = ({ record, onEdit }) => {
   const params = new URLSearchParams();
   if (record.tipoEquipoId.trim()) {
     params.set('tipoEquipo', record.tipoEquipoId);
@@ -436,13 +448,23 @@ const RecordActionsCell: React.FC<RecordActionsCellProps> = ({ record }) => {
   }
 
   return (
-    <Link
-      to={to}
-      className="inline-flex items-center gap-1 text-sm font-medium text-red-700 hover:text-red-900 hover:underline"
-    >
-      <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      Diagrama
-    </Link>
+    <div className="flex flex-col gap-2">
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 text-left text-sm font-medium text-gray-800 hover:text-gray-950 hover:underline"
+        onClick={() => onEdit(record)}
+      >
+        <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        Editar
+      </button>
+      <Link
+        to={to}
+        className="inline-flex items-center gap-1 text-sm font-medium text-red-700 hover:text-red-900 hover:underline"
+      >
+        <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        Diagrama
+      </Link>
+    </div>
   );
 };
 

@@ -16,7 +16,9 @@ import {
   createSharePointListItemViaMicrosoftGraph,
   fetchSharePointListViaMicrosoftGraph,
   loadGraphListItemAsMachineRecord,
+  updateSharePointListItemViaMicrosoftGraph,
 } from './microsoftGraphListService';
+import type { GraphCreateRecordInput } from './microsoftGraphListService';
 import { uploadListItemAttachmentRest } from './sharePointRestAttachments';
 import { filesToAttachmentPayloads } from '../utils/attachmentFilePayload';
 import { sharePointService as mockSharePointService } from './mockSharePointService';
@@ -84,6 +86,8 @@ interface SharePointDataService {
   getActivities: (activityTypeId?: string) => Promise<Activity[]>;
   getRecords: (filters?: Partial<MachineRecord>) => Promise<MachineRecord[]>;
   createRecord: (record: CreateRecordInput) => Promise<MachineRecord>;
+  /** Actualiza un ítem existente (Graph delegado o PATCH /api/ishikawa). */
+  updateRecord: (record: MachineRecord) => Promise<MachineRecord>;
   getKPIs: () => Promise<KPIData>;
   refreshDictionary?: () => Promise<void>;
 }
@@ -222,6 +226,29 @@ function delegatedGraphCreateErrorMessage(graphError: unknown): string {
   const detail =
     graphError instanceof Error ? graphError.message : 'Error desconocido al crear en Graph';
   return `No se pudo crear el registro con Microsoft Graph (permisos delegados). ${detail}`;
+}
+
+function delegatedGraphUpdateErrorMessage(graphError: unknown): string {
+  const detail =
+    graphError instanceof Error ? graphError.message : 'Error desconocido al actualizar en Graph';
+  return `No se pudo actualizar el registro con Microsoft Graph (permisos delegados). ${detail}`;
+}
+
+function machineRecordToGraphCreateInput(record: MachineRecord): GraphCreateRecordInput {
+  return {
+    tipoEquipoId: record.tipoEquipoId,
+    brandId: record.brandId,
+    modelId: record.modelId,
+    sectionId: record.sectionId,
+    problem: record.problem,
+    activityTypeId: record.activityTypeId,
+    activityId: record.activityId,
+    resource: record.resource,
+    time: record.time,
+    createdBy: record.createdBy,
+    attachment: record.attachment,
+    attachments: record.attachments,
+  };
 }
 
 class LiveSharePointService implements SharePointDataService {
@@ -528,50 +555,49 @@ class LiveSharePointService implements SharePointDataService {
     return response.records.map((record) => normalizeRecord(record));
   }
 
-  async createRecord(record: CreateRecordInput): Promise<MachineRecord> {
-    const { attachmentFiles, ...recordFields } = record;
-    const files = attachmentFiles;
-    const normalized = normalizeCreateRecordInput(recordFields);
-    const hasFiles = Boolean(files?.length);
+  /**
+   * Sin token REST del sitio: mismo JSON + base64 que /api/ishikawa (credenciales de aplicación en servidor).
+   */
+  private async createRecordSendingAttachmentsViaApi(
+    normalized: MachineRecordWithoutMeta,
+    files: File[]
+  ): Promise<MachineRecord> {
+    const payloads = await filesToAttachmentPayloads(files);
+    const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
+      method: 'POST',
+      body: JSON.stringify({ record: normalized, attachmentFiles: payloads }),
+    });
+    this.invalidateCaches();
+    return normalizeRecord(response.record);
+  }
 
-    const ctx = await resolveGraphListContext();
-    let sharePointRestToken: string | null = null;
-    if (hasFiles && ctx) {
-      await authService.initializeAuth();
-      sharePointRestToken = await authService.acquireSharePointAccessToken(ctx.siteUrl);
-    }
-    const useClientRestForAttachments = Boolean(hasFiles && ctx && sharePointRestToken);
-
-    /**
-     * Sin token REST del sitio: mismo JSON + base64 que /api/ishikawa (credenciales de aplicación en servidor).
-     * Con token: crear ítem (Graph o API), esperar, subir cada File por SharePoint REST (binario), como en VehicleFormReal.
-     */
-    if (hasFiles && !useClientRestForAttachments) {
-      const payloads = await filesToAttachmentPayloads(files!);
-      const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
-        method: 'POST',
-        body: JSON.stringify({ record: normalized, attachmentFiles: payloads }),
-      });
-      this.invalidateCaches();
-      return normalizeRecord(response.record);
-    }
-
-    if (!hasFiles) {
-      const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized);
-      if (graphRecord) {
-        this.invalidateCaches();
-        return normalizeRecord(graphRecord);
-      }
-      const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
-        method: 'POST',
-        body: JSON.stringify({ record: normalized }),
-      });
-      this.invalidateCaches();
-      return normalizeRecord(response.record);
-    }
-
-    let created: MachineRecord;
+  private async createRecordWithoutAttachmentFiles(
+    normalized: MachineRecordWithoutMeta
+  ): Promise<MachineRecord> {
     const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized);
+    if (graphRecord) {
+      this.invalidateCaches();
+      return normalizeRecord(graphRecord);
+    }
+    const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
+      method: 'POST',
+      body: JSON.stringify({ record: normalized }),
+    });
+    this.invalidateCaches();
+    return normalizeRecord(response.record);
+  }
+
+  /**
+   * Con token: crear ítem (Graph o API), esperar, subir cada File por SharePoint REST (binario), como en VehicleFormReal.
+   */
+  private async createRecordThenUploadAttachmentsViaRest(
+    normalized: MachineRecordWithoutMeta,
+    files: File[],
+    ctx: GraphListContext,
+    sharePointRestToken: string
+  ): Promise<MachineRecord> {
+    const graphRecord = await this.tryPersistRecordViaMicrosoftGraph(normalized);
+    let created: MachineRecord;
     if (graphRecord) {
       created = graphRecord;
     } else {
@@ -583,22 +609,7 @@ class LiveSharePointService implements SharePointDataService {
     }
 
     await delayMs(POST_CREATE_ATTACHMENT_DELAY_MS);
-    for (const file of files!) {
-      try {
-        await uploadListItemAttachmentRest({
-          siteUrl: ctx!.siteUrl,
-          listTitle: ctx!.listName,
-          itemId: created.id,
-          file,
-          accessToken: sharePointRestToken!,
-        });
-      } catch (uploadErr) {
-        const detail = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
-        throw new Error(
-          `El registro se creó (id ${created.id}) pero falló la subida de adjuntos por SharePoint REST. ${detail} Si el error es de red o CORS, configura el token del sitio en Azure o usa el envío por API sin sesión.`
-        );
-      }
-    }
+    await this.uploadAttachmentsAfterCreate(created, files, ctx, sharePointRestToken);
 
     this.invalidateCaches();
     const graphAccess = await authService.acquireGraphAccessToken();
@@ -618,6 +629,96 @@ class LiveSharePointService implements SharePointDataService {
       }
     }
     return normalizeRecord(created);
+  }
+
+  private async uploadAttachmentsAfterCreate(
+    created: MachineRecord,
+    files: File[],
+    ctx: GraphListContext,
+    sharePointRestToken: string
+  ): Promise<void> {
+    for (const file of files) {
+      try {
+        await uploadListItemAttachmentRest({
+          siteUrl: ctx.siteUrl,
+          listTitle: ctx.listName,
+          itemId: created.id,
+          file,
+          accessToken: sharePointRestToken,
+        });
+      } catch (uploadErr) {
+        const detail = uploadErr instanceof Error ? uploadErr.message : String(uploadErr);
+        throw new Error(
+          `El registro se creó (id ${created.id}) pero falló la subida de adjuntos por SharePoint REST. ${detail} Si el error es de red o CORS, configura el token del sitio en Azure o usa el envío por API sin sesión.`
+        );
+      }
+    }
+  }
+
+  async createRecord(record: CreateRecordInput): Promise<MachineRecord> {
+    const { attachmentFiles, ...recordFields } = record;
+    const files = attachmentFiles;
+    const normalized = normalizeCreateRecordInput(recordFields);
+    const hasFiles = Boolean(files?.length);
+
+    const ctx = await resolveGraphListContext();
+    let sharePointRestToken: string | null = null;
+    if (hasFiles && ctx) {
+      await authService.initializeAuth();
+      sharePointRestToken = await authService.acquireSharePointAccessToken(ctx.siteUrl);
+    }
+    const useClientRestForAttachments = Boolean(hasFiles && ctx && sharePointRestToken);
+
+    if (hasFiles && !useClientRestForAttachments) {
+      return this.createRecordSendingAttachmentsViaApi(normalized, files!);
+    }
+
+    if (!hasFiles) {
+      return this.createRecordWithoutAttachmentFiles(normalized);
+    }
+
+    return this.createRecordThenUploadAttachmentsViaRest(normalized, files!, ctx!, sharePointRestToken!);
+  }
+
+  async updateRecord(record: MachineRecord): Promise<MachineRecord> {
+    const id = record.id?.trim();
+    if (!id) {
+      throw new Error('El registro debe tener id para actualizar.');
+    }
+    const normalizedFields = normalizeCreateRecordInput(
+      machineRecordToGraphCreateInput(record) as CreateRecordFieldsInput
+    );
+
+    const ctx = await resolveGraphListContext();
+    await authService.initializeAuth();
+    await authService.getAccountWithRetry();
+    const token = await authService.acquireGraphAccessToken();
+
+    if (ctx && token) {
+      try {
+        const updated = await updateSharePointListItemViaMicrosoftGraph({
+          siteUrl: ctx.siteUrl,
+          listName: ctx.listName,
+          fieldMap: getClientFieldMap(),
+          accessToken: token,
+          itemId: id,
+          record: normalizedFields,
+        });
+        this.invalidateCaches();
+        return normalizeRecord(updated);
+      } catch (graphError) {
+        if (isDelegatedOnlySharePointMode()) {
+          throw new Error(delegatedGraphUpdateErrorMessage(graphError));
+        }
+      }
+    }
+
+    const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
+      method: 'PATCH',
+      body: JSON.stringify({ record: { ...record, ...normalizedFields, id } }),
+    });
+    this.invalidateCaches();
+    return normalizeRecord(response.record);
   }
 
   async getKPIs(): Promise<KPIData> {
@@ -663,6 +764,7 @@ const mockServiceAdapter: SharePointDataService = {
   getRecords: (filters?: Partial<MachineRecord>) => mockSharePointService.getRecords(filters),
   createRecord: (record: CreateRecordInput) =>
     mockSharePointService.createRecord(toMockCreateRecordPayload(record)),
+  updateRecord: (record: MachineRecord) => mockSharePointService.updateRecord(record),
   getKPIs: () => mockSharePointService.getKPIs(),
   refreshDictionary: async () => {},
 };
