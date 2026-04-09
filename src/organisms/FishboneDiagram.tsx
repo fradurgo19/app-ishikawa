@@ -115,21 +115,26 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
     <div className="bg-white rounded-lg p-6 shadow-md">
       <h2 className="text-2xl font-bold text-gray-900 mb-4">Diagrama Ishikawa</h2>
       <p className="text-sm text-gray-600 mb-6">
-        Tras elegir marca, los modelos alternan arriba y abajo de la espina; todo lo que cuelga de un modelo (secciones,
-        problemas, actividades…) sigue la misma dirección que ese modelo.
+        Vista vertical: el efecto va arriba y la espina desciende por marcas y modelos. Las causas se alternan a
+        izquierda y derecha en cada nivel (igual que antes arriba/abajo, ahora en los laterales).
       </p>
-      <div className="overflow-x-auto overflow-y-visible pb-8 pt-4">
+      <div className="overflow-y-auto overflow-x-auto pb-8 pt-4 max-h-[min(85vh,1200px)]">
         {fishboneData.length > 0 ? (
-          <div className="flex flex-row items-center justify-start min-w-min gap-0 px-2">
+          <div className="flex flex-col items-center min-w-min gap-0 px-2">
+            <div
+              className="flex shrink-0 flex-col items-center gap-2 rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
+              title="Efecto / foco del análisis"
+            >
+              <span className="hidden sm:inline">Efecto</span>
+              <span className="max-w-[min(90vw,320px)] whitespace-pre-wrap break-words sm:max-w-[280px]">
+                {selectedProblem || 'Análisis'}
+              </span>
+            </div>
+            <div className="h-8 w-px shrink-0 bg-gray-400" aria-hidden />
             {fishboneData.map((node, index) => (
               <React.Fragment key={node.id}>
-                {index > 0 && (
-                  <div
-                    className="h-1 w-10 sm:w-14 shrink-0 bg-gray-400 rounded-full self-center"
-                    aria-hidden
-                  />
-                )}
-                <div className="shrink-0 flex flex-col items-center">
+                {index > 0 && <div className="h-10 w-px shrink-0 bg-gray-400" aria-hidden />}
+                <div className="flex w-full max-w-5xl shrink-0 flex-col items-center">
                   <FishboneBranch
                     node={node}
                     onToggle={toggleNode}
@@ -139,19 +144,6 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
                 </div>
               </React.Fragment>
             ))}
-            <div
-              className="h-1 w-10 sm:w-14 shrink-0 self-center bg-gray-400 rounded-full"
-              aria-hidden
-            />
-            <div
-              className="flex shrink-0 items-center gap-2 rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3 text-sm font-semibold text-red-900"
-              title="Efecto / foco del análisis"
-            >
-              <span className="hidden sm:inline">Efecto</span>
-              <span className="max-w-[140px] truncate sm:max-w-[200px]">
-                {selectedProblem || 'Análisis'}
-              </span>
-            </div>
           </div>
         ) : (
           <p className="text-gray-500 text-center py-8">
@@ -164,8 +156,8 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
 };
 
 /**
- * Sin dirección heredada (nodo marca en la espina): los hijos alternan arriba/abajo.
- * Con dirección heredada: las ramas bajo una columna superior o inferior repiten el mismo lado que el modelo padre.
+ * Sin herencia: alterna causas a izquierda y derecha de la espina vertical.
+ * Con herencia: los hijos repiten el mismo lateral (izq./der.) que el padre.
  */
 function splitChildrenIntoUpperAndLowerRibs(
   children: FishboneNode[],
@@ -202,8 +194,9 @@ interface FishboneBranchProps {
   getNodeIcon: (type: FishboneNode['type']) => LucideIcon | null;
 }
 
-function FishboneRibConnector(): React.ReactElement {
-  return <div className="h-10 w-px shrink-0 bg-gray-400" aria-hidden />;
+/** Tramo horizontal hacia la espina central (diagrama vertical). */
+function FishboneRibHorizontalConnector(): React.ReactElement {
+  return <div className="h-px w-4 shrink-0 bg-gray-400 sm:w-6 md:w-8" aria-hidden />;
 }
 
 interface FishboneRibColumnProps {
@@ -222,7 +215,7 @@ function FishboneRibColumn({
   getNodeIcon,
 }: Readonly<FishboneRibColumnProps>) {
   const branch = (
-    <div className="max-w-[220px]">
+    <div className="max-w-[min(100%,220px)]">
       <FishboneBranch
         node={child}
         inheritedRib={placement}
@@ -232,21 +225,21 @@ function FishboneRibColumn({
       />
     </div>
   );
-  const connector = <FishboneRibConnector />;
+  const connector = <FishboneRibHorizontalConnector />;
+
+  if (placement === 'upper') {
+    return (
+      <div className="flex w-full flex-row flex-wrap items-center justify-end gap-1 sm:flex-nowrap">
+        {branch}
+        {connector}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col items-center">
-      {placement === 'upper' ? (
-        <>
-          {branch}
-          {connector}
-        </>
-      ) : (
-        <>
-          {connector}
-          {branch}
-        </>
-      )}
+    <div className="flex w-full flex-row flex-wrap items-center justify-start gap-1 sm:flex-nowrap">
+      {connector}
+      {branch}
     </div>
   );
 }
@@ -263,9 +256,9 @@ function FishboneBranch({
   const Icon = getNodeIcon(node.type);
 
   return (
-    <div className="flex flex-col items-center">
+    <div className="flex w-full flex-col items-stretch gap-6 md:flex-row md:items-center md:justify-center md:gap-3">
       {node.expanded && upper.length > 0 && (
-        <div className="mb-0 flex flex-row flex-wrap items-end justify-center gap-x-8 gap-y-4">
+        <div className="order-2 flex w-full flex-col gap-4 md:order-1 md:max-w-[42%] md:min-w-0 md:w-auto md:items-end">
           {upper.map((child) => (
             <FishboneRibColumn
               key={child.id}
@@ -279,7 +272,7 @@ function FishboneBranch({
         </div>
       )}
 
-      <div className="relative z-10 flex flex-row items-center">
+      <div className="relative z-10 order-1 flex shrink-0 flex-row items-center justify-center md:order-2">
         <FishboneNodeButton
           node={node}
           hasChildren={hasChildren}
@@ -290,7 +283,7 @@ function FishboneBranch({
       </div>
 
       {node.expanded && lower.length > 0 && (
-        <div className="mt-0 flex flex-row flex-wrap items-start justify-center gap-x-8 gap-y-4">
+        <div className="order-3 flex w-full flex-col gap-4 md:max-w-[42%] md:min-w-0 md:w-auto md:items-start">
           {lower.map((child) => (
             <FishboneRibColumn
               key={child.id}
