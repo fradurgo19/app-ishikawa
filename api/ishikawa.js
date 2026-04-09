@@ -152,8 +152,12 @@ async function writeUpdatedRecordResponse(req, res, sharePointConfigResolved) {
     requestBody.removeAttachmentFileNames
   );
 
-  const payload = buildRecordPayload(incomingRecord, sharePointConfigResolved.fieldMap);
-  if (attachmentFiles.length > 0) {
+  const payload = buildRecordPayload(incomingRecord, sharePointConfigResolved.fieldMap, {
+    isMerge: true,
+  });
+  const hasNativeAttachmentMutation =
+    attachmentFiles.length > 0 || removeAttachmentFileNames.length > 0;
+  if (hasNativeAttachmentMutation) {
     stripCustomAttachmentFieldsFromPayload(payload, sharePointConfigResolved.fieldMap);
   }
   await mergeListItem(sharePointConfigResolved, rawId, payload);

@@ -689,15 +689,17 @@ export async function fetchSharePointListViaMicrosoftGraph(options: {
     fetchAllGraphListItems(siteId, listId, accessToken),
   ]);
 
-  const itemIds = items.map((it) => String(it.id));
   const urlCtx: ListAttachmentUrlContext = { siteUrl, listTitle: listName };
-  const attachmentMap = await buildGraphNativeAttachmentMap(
-    siteId,
-    listId,
-    itemIds,
-    accessToken,
-    urlCtx
-  );
+  /** En varios tenants Graph devuelve 400 en .../items/{id}/attachments; con token REST se rellena vía SharePoint nativo. */
+  const attachmentMap = sharePointAccessToken
+    ? new Map<string, Attachment[]>()
+    : await buildGraphNativeAttachmentMap(
+        siteId,
+        listId,
+        items.map((it) => String(it.id)),
+        accessToken,
+        urlCtx
+      );
 
   if (sharePointAccessToken) {
     await enrichAttachmentMapWithSharePointRest({

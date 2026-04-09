@@ -537,7 +537,12 @@ export function mapListItemToMachineRecord(item, fieldMap, siteOrigin = '') {
   return mappedRecord;
 }
 
-export function buildRecordPayload(record, fieldMap) {
+/**
+ * @param {{ isMerge?: boolean }} [options]
+ * @param {boolean} [options.isMerge] — Actualización de ítem (MERGE). Omite columnas que SharePoint suele rechazar al actualizar (p. ej. autor / creado por).
+ */
+export function buildRecordPayload(record, fieldMap, options) {
+  const isMerge = Boolean(options && options.isMerge);
   const payload = {
     [fieldMap.brand]: normalizeRequiredText(record.brandId, 'brandId'),
     [fieldMap.model]: normalizeRequiredText(record.modelId, 'modelId'),
@@ -560,9 +565,11 @@ export function buildRecordPayload(record, fieldMap) {
     payload[fieldMap.resource] = resource;
   }
 
-  const createdBy = getTextValue(record.createdBy);
-  if (fieldMap.createdBy && createdBy) {
-    payload[fieldMap.createdBy] = createdBy;
+  if (!isMerge) {
+    const createdBy = getTextValue(record.createdBy);
+    if (fieldMap.createdBy && createdBy) {
+      payload[fieldMap.createdBy] = createdBy;
+    }
   }
 
   const normalizedAttachment = normalizeAttachment(record.attachment);
