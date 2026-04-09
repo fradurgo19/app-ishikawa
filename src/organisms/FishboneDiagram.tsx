@@ -215,7 +215,7 @@ function FishboneRibColumn({
   getNodeIcon,
 }: Readonly<FishboneRibColumnProps>) {
   const branch = (
-    <div className="max-w-[min(100%,220px)]">
+    <div className="min-w-0 w-full max-w-[min(100%,280px)] md:max-w-none">
       <FishboneBranch
         node={child}
         inheritedRib={placement}
@@ -256,9 +256,9 @@ function FishboneBranch({
   const Icon = getNodeIcon(node.type);
 
   return (
-    <div className="flex w-full min-w-0 flex-col items-stretch gap-8 md:flex-row md:items-center md:justify-center md:gap-x-8 md:gap-y-4 lg:gap-x-10">
+    <div className="flex w-full min-w-0 flex-col items-stretch gap-8 md:flex-row md:items-start md:justify-center md:gap-x-8 md:gap-y-6 lg:gap-x-10">
       {node.expanded && upper.length > 0 && (
-        <div className="order-2 flex w-full min-w-0 flex-col gap-6 md:order-1 md:max-w-[42%] md:items-end">
+        <div className="order-2 flex w-full min-w-0 flex-col gap-6 md:order-1 md:max-w-[46%] md:items-end">
           {upper.map((child) => (
             <FishboneRibColumn
               key={child.id}
@@ -272,7 +272,7 @@ function FishboneBranch({
         </div>
       )}
 
-      <div className="order-1 flex shrink-0 flex-row items-center justify-center md:order-2">
+      <div className="order-1 flex shrink-0 flex-row items-start justify-center md:order-2 md:pt-0.5">
         <FishboneNodeButton
           node={node}
           hasChildren={hasChildren}
@@ -283,7 +283,7 @@ function FishboneBranch({
       </div>
 
       {node.expanded && lower.length > 0 && (
-        <div className="order-3 flex w-full min-w-0 flex-col gap-6 md:max-w-[42%] md:items-start">
+        <div className="order-3 flex w-full min-w-0 flex-col gap-6 md:max-w-[46%] md:items-start">
           {lower.map((child) => (
             <FishboneRibColumn
               key={child.id}
