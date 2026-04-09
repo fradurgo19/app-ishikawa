@@ -15,6 +15,9 @@ const NewRecordPage = lazy(() =>
 const FishbonePage = lazy(() =>
   import('./pages/FishbonePage').then((module) => ({ default: module.FishbonePage }))
 );
+const FishboneDetailPage = lazy(() =>
+  import('./pages/FishboneDetailPage').then((module) => ({ default: module.FishboneDetailPage }))
+);
 const DataTablePage = lazy(() =>
   import('./pages/DataTablePage').then((module) => ({ default: module.DataTablePage }))
 );
@@ -84,6 +87,14 @@ const AppRoutes: React.FC = () => {
           element={
             <ProtectedRoute>
               <FishbonePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/fishbone/detail"
+          element={
+            <ProtectedRoute>
+              <FishboneDetailPage />
             </ProtectedRoute>
           }
         />

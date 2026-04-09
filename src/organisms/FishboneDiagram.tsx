@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
   Activity,
   ActivityType,
   Brand,
+  FishboneAttachmentLeafDetail,
+  FishboneDiagramDetailPayload,
   FishboneNode,
+  FishboneResourceLeafDetail,
   MachineRecord,
   Model,
   Section,
@@ -21,6 +25,34 @@ interface FishboneDiagramProps {
   selectedProblem?: string;
 }
 
+function isFishboneResourceLeafDetail(data: unknown): data is FishboneResourceLeafDetail {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  const o = data as Record<string, unknown>;
+  return typeof o.recordId === 'string' && typeof o.resourceText === 'string' && Array.isArray(o.allAttachments);
+}
+
+function isFishboneAttachmentLeafDetail(data: unknown): data is FishboneAttachmentLeafDetail {
+  if (!data || typeof data !== 'object') {
+    return false;
+  }
+  const o = data as Record<string, unknown>;
+  const att = o.attachment;
+  if (!att || typeof att !== 'object') {
+    return false;
+  }
+  const a = att as Record<string, unknown>;
+  return typeof o.recordId === 'string' && Array.isArray(o.allAttachments) && typeof a.id === 'string';
+}
+
+function fishboneNodeOpensDetailView(node: FishboneNode): boolean {
+  if (node.type === 'recurso' && isFishboneResourceLeafDetail(node.data)) {
+    return true;
+  }
+  return node.type === 'adjunto' && isFishboneAttachmentLeafDetail(node.data);
+}
+
 export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
   selectedTipoEquipo,
   selectedBrand,
@@ -29,6 +61,40 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
 }) => {
   const [fishboneData, setFishboneData] = useState<FishboneNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  const openLeafDetail = useCallback(
+    (node: FishboneNode) => {
+      const returnTo = `${location.pathname}${location.search}`;
+      const baseState =
+        location.state !== null && typeof location.state === 'object'
+          ? { ...location.state, fromDataTable: true as const }
+          : { fromDataTable: true as const };
+
+      if (node.type === 'recurso' && isFishboneResourceLeafDetail(node.data)) {
+        const diagramDetail: FishboneDiagramDetailPayload = {
+          kind: 'resource',
+          recordId: node.data.recordId,
+          resourceText: node.data.resourceText,
+          allAttachments: node.data.allAttachments,
+        };
+        navigate('/fishbone/detail', { state: { ...baseState, returnTo, diagramDetail } });
+        return;
+      }
+
+      if (node.type === 'adjunto' && isFishboneAttachmentLeafDetail(node.data)) {
+        const diagramDetail: FishboneDiagramDetailPayload = {
+          kind: 'attachments',
+          recordId: node.data.recordId,
+          focusAttachmentId: node.data.attachment.id,
+          allAttachments: node.data.allAttachments,
+        };
+        navigate('/fishbone/detail', { state: { ...baseState, returnTo, diagramDetail } });
+      }
+    },
+    [navigate, location.pathname, location.search, location.state]
+  );
 
   const loadFishboneData = useCallback(async () => {
     setLoading(true);
@@ -114,15 +180,15 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
   return (
     <div className="bg-white rounded-lg p-6 shadow-md">
       <h2 className="text-2xl font-bold text-gray-900 mb-4">Diagrama Ishikawa</h2>
-      <p className="text-sm text-gray-600 mb-6">
+      <p className="text-sm text-gray-600 mb-4">
         Vista vertical: el efecto va arriba y la espina desciende por marcas y modelos. Las causas se alternan a
         izquierda y derecha en cada nivel (igual que antes arriba/abajo, ahora en los laterales).
       </p>
-      <div className="overflow-y-auto overflow-x-auto pb-8 pt-4 max-h-[min(85vh,1200px)]">
+      <div className="max-h-[min(85vh,1200px)] overflow-x-auto overflow-y-auto pb-4 pt-2">
         {fishboneData.length > 0 ? (
-          <div className="flex min-w-min flex-col items-center gap-6 px-2">
+          <div className="flex min-w-min flex-col items-center gap-3 px-2">
             <div
-              className="flex shrink-0 flex-col items-center gap-2 rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
+              className="flex shrink-0 flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
               title="Efecto / foco del análisis"
             >
               <span className="hidden sm:inline">Efecto</span>
@@ -130,13 +196,15 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
                 {selectedProblem || 'Análisis'}
               </span>
             </div>
-            <div className="h-8 w-px shrink-0 bg-gray-400" aria-hidden />
+            <div className="h-4 w-px shrink-0 bg-gray-400" aria-hidden />
             {fishboneData.map((node, index) => (
               <React.Fragment key={node.id}>
-                {index > 0 && <div className="h-10 w-px shrink-0 bg-gray-400" aria-hidden />}
-                <div className="flex w-full max-w-5xl shrink-0 flex-col items-center py-2">
+                {index > 0 && <div className="h-5 w-px shrink-0 bg-gray-400" aria-hidden />}
+                <div className="flex w-full max-w-5xl shrink-0 flex-col items-center py-0.5">
                   <FishboneBranch
                     node={node}
+                    depth={0}
+                    onOpenLeafDetail={openLeafDetail}
                     onToggle={toggleNode}
                     getNodeColor={getNodeColor}
                     getNodeIcon={getNodeIcon}
@@ -187,8 +255,11 @@ function splitChildrenIntoUpperAndLowerRibs(
 
 interface FishboneBranchProps {
   node: FishboneNode;
+  /** 0 = marca, 1 = modelo, ≥2 = sección y niveles inferiores (espaciado más amplio entre tarjetas). */
+  depth?: number;
   /** Desde qué lado de la espina cuelga esta rama; sus hijos repiten el mismo lado. */
   inheritedRib?: 'upper' | 'lower';
+  onOpenLeafDetail?: (node: FishboneNode) => void;
   onToggle: (nodeId: string) => void;
   getNodeColor: (type: FishboneNode['type']) => string;
   getNodeIcon: (type: FishboneNode['type']) => LucideIcon | null;
@@ -201,7 +272,9 @@ function FishboneRibHorizontalConnector(): React.ReactElement {
 
 interface FishboneRibColumnProps {
   child: FishboneNode;
+  childDepth: number;
   placement: 'upper' | 'lower';
+  onOpenLeafDetail?: (node: FishboneNode) => void;
   onToggle: (nodeId: string) => void;
   getNodeColor: (type: FishboneNode['type']) => string;
   getNodeIcon: (type: FishboneNode['type']) => LucideIcon | null;
@@ -209,7 +282,9 @@ interface FishboneRibColumnProps {
 
 function FishboneRibColumn({
   child,
+  childDepth,
   placement,
+  onOpenLeafDetail,
   onToggle,
   getNodeColor,
   getNodeIcon,
@@ -218,7 +293,9 @@ function FishboneRibColumn({
     <div className="min-w-0 w-full max-w-[min(100%,280px)] md:max-w-none">
       <FishboneBranch
         node={child}
+        depth={childDepth}
         inheritedRib={placement}
+        onOpenLeafDetail={onOpenLeafDetail}
         onToggle={onToggle}
         getNodeColor={getNodeColor}
         getNodeIcon={getNodeIcon}
@@ -226,10 +303,14 @@ function FishboneRibColumn({
     </div>
   );
   const connector = <FishboneRibHorizontalConnector />;
+  const ribRowPad = childDepth >= 2 ? 'py-3' : 'py-1';
+  const ribGap = childDepth >= 2 ? 'gap-3 sm:gap-4' : 'gap-2 sm:gap-2.5';
 
   if (placement === 'upper') {
     return (
-      <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-end gap-2 py-2 sm:flex-nowrap sm:gap-3">
+      <div
+        className={`flex w-full min-w-0 flex-row flex-wrap items-center justify-end sm:flex-nowrap ${ribRowPad} ${ribGap}`}
+      >
         {branch}
         {connector}
       </div>
@@ -237,7 +318,9 @@ function FishboneRibColumn({
   }
 
   return (
-    <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-start gap-2 py-2 sm:flex-nowrap sm:gap-3">
+    <div
+      className={`flex w-full min-w-0 flex-row flex-wrap items-center justify-start sm:flex-nowrap ${ribRowPad} ${ribGap}`}
+    >
       {connector}
       {branch}
     </div>
@@ -246,7 +329,9 @@ function FishboneRibColumn({
 
 function FishboneBranch({
   node,
+  depth = 0,
   inheritedRib,
+  onOpenLeafDetail,
   onToggle,
   getNodeColor,
   getNodeIcon,
@@ -254,16 +339,29 @@ function FishboneBranch({
   const hasChildren = node.children.length > 0;
   const { upper, lower } = splitChildrenIntoUpperAndLowerRibs(node.children, inheritedRib);
   const Icon = getNodeIcon(node.type);
+  const compactDepth = depth < 2;
+  const nextDepth = depth + 1;
+
+  const branchLayout = compactDepth
+    ? 'gap-3 md:gap-x-4 md:gap-y-2 lg:gap-x-5'
+    : 'gap-8 md:gap-x-8 md:gap-y-5 lg:gap-x-10';
+  const ribStackGap = compactDepth ? 'gap-2.5' : 'gap-8';
 
   return (
-    <div className="flex w-full min-w-0 flex-col items-stretch gap-8 md:flex-row md:items-start md:justify-center md:gap-x-8 md:gap-y-6 lg:gap-x-10">
+    <div
+      className={`flex w-full min-w-0 flex-col items-stretch md:flex-row md:items-start md:justify-center ${branchLayout}`}
+    >
       {node.expanded && upper.length > 0 && (
-        <div className="order-2 flex w-full min-w-0 flex-col gap-6 md:order-1 md:max-w-[46%] md:items-end">
+        <div
+          className={`order-2 flex w-full min-w-0 flex-col md:order-1 md:max-w-[46%] md:items-end ${ribStackGap}`}
+        >
           {upper.map((child) => (
             <FishboneRibColumn
               key={child.id}
               child={child}
+              childDepth={nextDepth}
               placement="upper"
+              onOpenLeafDetail={onOpenLeafDetail}
               onToggle={onToggle}
               getNodeColor={getNodeColor}
               getNodeIcon={getNodeIcon}
@@ -278,17 +376,20 @@ function FishboneBranch({
           hasChildren={hasChildren}
           Icon={Icon}
           className={getNodeColor(node.type)}
+          onOpenLeafDetail={onOpenLeafDetail}
           onToggle={() => hasChildren && onToggle(node.id)}
         />
       </div>
 
       {node.expanded && lower.length > 0 && (
-        <div className="order-3 flex w-full min-w-0 flex-col gap-6 md:max-w-[46%] md:items-start">
+        <div className={`order-3 flex w-full min-w-0 flex-col md:max-w-[46%] md:items-start ${ribStackGap}`}>
           {lower.map((child) => (
             <FishboneRibColumn
               key={child.id}
               child={child}
+              childDepth={nextDepth}
               placement="lower"
+              onOpenLeafDetail={onOpenLeafDetail}
               onToggle={onToggle}
               getNodeColor={getNodeColor}
               getNodeIcon={getNodeIcon}
@@ -305,6 +406,7 @@ interface FishboneNodeButtonProps {
   hasChildren: boolean;
   Icon: LucideIcon | null;
   className: string;
+  onOpenLeafDetail?: (node: FishboneNode) => void;
   onToggle: () => void;
 }
 
@@ -313,17 +415,29 @@ function FishboneNodeButton({
   hasChildren,
   Icon,
   className,
+  onOpenLeafDetail,
   onToggle,
 }: Readonly<FishboneNodeButtonProps>) {
+  const opensDetail = Boolean(onOpenLeafDetail) && fishboneNodeOpensDetailView(node);
+  const interactive = hasChildren || opensDetail;
+
+  const handleClick = () => {
+    if (opensDetail && onOpenLeafDetail) {
+      onOpenLeafDetail(node);
+      return;
+    }
+    onToggle();
+  };
+
   return (
     <button
       type="button"
-      onClick={onToggle}
+      onClick={handleClick}
       aria-expanded={hasChildren ? node.expanded : undefined}
       className={`flex max-w-[240px] items-center gap-2 rounded-lg border-2 px-3 py-2 text-left text-sm transition-all duration-200 ${className} ${
-        hasChildren ? 'cursor-pointer hover:shadow-md' : 'cursor-default opacity-95'
+        interactive ? 'cursor-pointer hover:shadow-md' : 'cursor-default opacity-95'
       }`}
-      disabled={!hasChildren}
+      disabled={!interactive}
     >
       {hasChildren &&
         (node.expanded ? <ChevronDown size={16} className="shrink-0" /> : <ChevronRight size={16} className="shrink-0" />)}
@@ -646,12 +760,18 @@ function listRecordAttachments(record: MachineRecord) {
 }
 
 function buildDetailNodes(record: MachineRecord): FishboneNode[] {
+  const allAttachments = listRecordAttachments(record);
   const detailNodes: FishboneNode[] = [
     {
       id: `resource-${record.id}`,
       type: 'recurso',
       label: record.resource,
       expanded: false,
+      data: {
+        recordId: record.id,
+        resourceText: record.resource,
+        allAttachments,
+      } satisfies FishboneResourceLeafDetail,
       children: [],
     },
     {
@@ -663,13 +783,17 @@ function buildDetailNodes(record: MachineRecord): FishboneNode[] {
     },
   ];
 
-  for (const att of listRecordAttachments(record)) {
+  for (const att of allAttachments) {
     detailNodes.push({
       id: `attachment-${record.id}-${att.id}`,
       type: 'adjunto',
       label: att.name,
       expanded: false,
-      data: att,
+      data: {
+        recordId: record.id,
+        attachment: att,
+        allAttachments,
+      } satisfies FishboneAttachmentLeafDetail,
       children: [],
     });
   }

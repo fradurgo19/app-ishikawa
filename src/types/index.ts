@@ -78,6 +78,35 @@ export interface FishboneNode {
   data?: unknown;
 }
 
+/** `FishboneNode.data` en hoja Recurso del diagrama Ishikawa (abrir detalle). */
+export interface FishboneResourceLeafDetail {
+  recordId: string;
+  resourceText: string;
+  allAttachments: Attachment[];
+}
+
+/** `FishboneNode.data` en hoja Adjunto del diagrama Ishikawa (abrir detalle). */
+export interface FishboneAttachmentLeafDetail {
+  recordId: string;
+  attachment: Attachment;
+  allAttachments: Attachment[];
+}
+
+/** Estado al navegar a `/fishbone/detail` desde el diagrama. */
+export type FishboneDiagramDetailPayload =
+  | {
+      kind: 'resource';
+      recordId: string;
+      resourceText: string;
+      allAttachments: Attachment[];
+    }
+  | {
+      kind: 'attachments';
+      recordId: string;
+      focusAttachmentId: string;
+      allAttachments: Attachment[];
+    };
+
 export interface KPIData {
   totalTiposEquipo: number;
   totalMarcas: number;
