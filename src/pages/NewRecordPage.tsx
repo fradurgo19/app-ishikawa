@@ -1,13 +1,20 @@
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { Button } from '../atoms/Button';
 import { Input } from '../atoms/Input';
 import { Textarea } from '../atoms/Textarea';
 import { Select } from '../atoms/Select';
+import { SearchableSelect } from '../atoms/SearchableSelect';
 import { Card } from '../atoms/Card';
 import { sharePointService } from '../services/sharePointService';
 import { Section, ActivityType } from '../types';
+import {
+  getDistinctTiposEquipo,
+  getMarcasForTipoEquipo,
+  getModelosForTipoYMarca,
+  normalizeLabel,
+} from '../data/equipmentMatrix';
 import { ArrowLeft, Save, Trash2 } from 'lucide-react';
 
 interface FormData {
@@ -23,6 +30,23 @@ interface FormData {
 }
 
 const DEFAULT_CREATED_BY_USER_ID = '1';
+
+function mergeUniqueSortedStrings(a: string[], b: string[]): string[] {
+  const set = new Set<string>();
+  for (const x of a) {
+    const t = x?.trim();
+    if (t) {
+      set.add(t);
+    }
+  }
+  for (const x of b) {
+    const t = x?.trim();
+    if (t) {
+      set.add(t);
+    }
+  }
+  return Array.from(set).sort((x, y) => x.localeCompare(y, 'es'));
+}
 
 interface StagedAttachmentRowProps {
   file: File;
@@ -156,7 +180,7 @@ const NewRecordAttachmentsField: React.FC<NewRecordAttachmentsFieldProps> = ({
 
 export const NewRecordPage: React.FC = () => {
   const navigate = useNavigate();
-  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, control, watch, setValue, formState: { errors } } = useForm<FormData>({
     defaultValues: {
       tipoEquipoId: '',
       brandId: '',
@@ -173,8 +197,6 @@ export const NewRecordPage: React.FC = () => {
   const [sections, setSections] = useState<Section[]>([]);
   const [activityTypes, setActivityTypes] = useState<ActivityType[]>([]);
   const [tiposOptions, setTiposOptions] = useState<{ value: string; label: string }[]>([]);
-  const [marcasOptions, setMarcasOptions] = useState<{ value: string; label: string }[]>([]);
-  const [modelosOptions, setModelosOptions] = useState<{ value: string; label: string }[]>([]);
   const [loading, setLoading] = useState(false);
   /** Evita dejar los selects en disabled cuando la API devuelve listas vacías o falla (antes: disabled si length===0). */
   const [selectOptionsLoading, setSelectOptionsLoading] = useState(true);
@@ -205,9 +227,7 @@ export const NewRecordPage: React.FC = () => {
         sharePointService.getActivityTypes(),
         sharePointService.getSectionOptionsForNewRecord(),
       ]);
-      setTiposOptions(toSelectOptions(equipment.tipos));
-      setMarcasOptions(toSelectOptions(equipment.marcas));
-      setModelosOptions(toSelectOptions(equipment.modelos));
+      setTiposOptions(toSelectOptions(mergeUniqueSortedStrings(equipment.tipos, getDistinctTiposEquipo())));
       setActivityTypes(activityTypesData);
       setSections(sectionsData);
     } catch (error) {
@@ -223,6 +243,64 @@ export const NewRecordPage: React.FC = () => {
   useEffect(() => {
     void loadInitialData();
   }, [loadInitialData]);
+
+  const tipoEquipoIdWatch = watch('tipoEquipoId');
+  const brandIdWatch = watch('brandId');
+
+  const tipoNorm = normalizeLabel(tipoEquipoIdWatch);
+  const brandNorm = normalizeLabel(brandIdWatch);
+
+  const marcasOptionsFiltered = useMemo(() => {
+    if (!tipoNorm) {
+      return [];
+    }
+    return getMarcasForTipoEquipo(tipoNorm).map((m) => ({ value: m, label: m }));
+  }, [tipoNorm]);
+
+  const modelosOptionsFiltered = useMemo(() => {
+    if (!tipoNorm || !brandNorm) {
+      return [];
+    }
+    return getModelosForTipoYMarca(tipoNorm, brandNorm).map((m) => ({ value: m, label: m }));
+  }, [tipoNorm, brandNorm]);
+
+  const marcaPlaceholder = useMemo(() => {
+    if (tipoNorm) {
+      return 'Buscar o seleccionar marca';
+    }
+    return 'Primero elija tipo de equipo';
+  }, [tipoNorm]);
+
+  const modeloPlaceholder = useMemo(() => {
+    if (tipoNorm) {
+      if (brandNorm) {
+        return 'Buscar o seleccionar modelo';
+      }
+      return 'Primero elija marca';
+    }
+    return 'Primero elija tipo de equipo';
+  }, [tipoNorm, brandNorm]);
+
+  const prevTipoRef = useRef<string>('');
+  useEffect(() => {
+    const next = tipoNorm;
+    if (next !== prevTipoRef.current) {
+      prevTipoRef.current = next;
+      setValue('brandId', '');
+      setValue('modelId', '');
+      setValue('sectionId', '');
+    }
+  }, [tipoNorm, setValue]);
+
+  const prevBrandRef = useRef<string>('');
+  useEffect(() => {
+    const next = brandNorm;
+    if (next !== prevBrandRef.current) {
+      prevBrandRef.current = next;
+      setValue('modelId', '');
+      setValue('sectionId', '');
+    }
+  }, [brandNorm, setValue]);
 
   const onSubmit = useCallback(
     async (data: FormData) => {
@@ -257,8 +335,9 @@ export const NewRecordPage: React.FC = () => {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Crear Nuevo Registro</h1>
             <p className="text-gray-600 mt-2">
-              Los desplegables cargan las opciones de las columnas tipo selección de la lista; el resto son texto
-              libre. Las selecciones no se filtran entre sí.
+              Tras elegir el tipo de equipo, marca y modelo se limitan a las combinaciones válidas de la matriz (como
+              en el selector). Puedes escribir para filtrar dentro de cada lista. El resto de campos cargan desde
+              SharePoint.
             </p>
           </div>
         </div>
@@ -284,31 +363,64 @@ export const NewRecordPage: React.FC = () => {
           )}
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <Select
-                label="Tipo de equipo *"
-                options={tiposOptions}
-                placeholder="Selecciona tipo de equipo"
-                disabled={selectOptionsLoading}
-                {...register('tipoEquipoId', { required: 'El tipo de equipo es requerido' })}
-                error={errors.tipoEquipoId?.message}
+              <Controller
+                name="tipoEquipoId"
+                control={control}
+                rules={{ required: 'El tipo de equipo es requerido' }}
+                render={({ field }) => (
+                  <SearchableSelect
+                    label="Tipo de equipo *"
+                    options={tiposOptions}
+                    placeholder="Buscar o seleccionar tipo de equipo"
+                    disabled={selectOptionsLoading}
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    name={field.name}
+                    ref={field.ref}
+                    error={errors.tipoEquipoId?.message}
+                  />
+                )}
               />
 
-              <Select
-                label="Marca *"
-                options={marcasOptions}
-                placeholder="Selecciona marca"
-                disabled={selectOptionsLoading}
-                {...register('brandId', { required: 'La marca es requerida' })}
-                error={errors.brandId?.message}
+              <Controller
+                name="brandId"
+                control={control}
+                rules={{ required: 'La marca es requerida' }}
+                render={({ field }) => (
+                  <SearchableSelect
+                    label="Marca *"
+                    options={marcasOptionsFiltered}
+                    placeholder={marcaPlaceholder}
+                    disabled={selectOptionsLoading || !tipoNorm}
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    name={field.name}
+                    ref={field.ref}
+                    error={errors.brandId?.message}
+                  />
+                )}
               />
 
-              <Select
-                label="Modelo *"
-                options={modelosOptions}
-                placeholder="Selecciona modelo"
-                disabled={selectOptionsLoading}
-                {...register('modelId', { required: 'El modelo es requerido' })}
-                error={errors.modelId?.message}
+              <Controller
+                name="modelId"
+                control={control}
+                rules={{ required: 'El modelo es requerido' }}
+                render={({ field }) => (
+                  <SearchableSelect
+                    label="Modelo *"
+                    options={modelosOptionsFiltered}
+                    placeholder={modeloPlaceholder}
+                    disabled={selectOptionsLoading || !tipoNorm || !brandNorm}
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    name={field.name}
+                    ref={field.ref}
+                    error={errors.modelId?.message}
+                  />
+                )}
               />
             </div>
 

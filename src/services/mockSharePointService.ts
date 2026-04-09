@@ -1,4 +1,5 @@
 import { Brand, Model, Section, ActivityType, Activity, MachineRecord, KPIData } from '../types';
+import { getDistinctModeloIdsFromMatrix } from '../data/equipmentMatrix';
 
 const LOCALE_SORT = 'es';
 
@@ -116,7 +117,17 @@ class MockSharePointService {
       a.localeCompare(b, LOCALE_SORT)
     );
     const marcas = mockBrands.map((b) => b.id).sort((a, b) => a.localeCompare(b, LOCALE_SORT));
-    const modelos = mockModels.map((m) => m.id).sort((a, b) => a.localeCompare(b, LOCALE_SORT));
+    const modelSet = new Set<string>();
+    for (const m of mockModels) {
+      const id = m.id.trim();
+      if (id) {
+        modelSet.add(id);
+      }
+    }
+    for (const id of getDistinctModeloIdsFromMatrix()) {
+      modelSet.add(id);
+    }
+    const modelos = Array.from(modelSet).sort((a, b) => a.localeCompare(b, LOCALE_SORT));
     return { tipos, marcas, modelos };
   }
 

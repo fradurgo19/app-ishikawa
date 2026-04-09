@@ -21,6 +21,7 @@ import {
 import type { GraphCreateRecordInput } from './microsoftGraphListService';
 import { uploadListItemAttachmentRest } from './sharePointRestAttachments';
 import { filesToAttachmentPayloads } from '../utils/attachmentFilePayload';
+import { getDistinctModeloIdsFromMatrix } from '../data/equipmentMatrix';
 import { sharePointService as mockSharePointService } from './mockSharePointService';
 
 type CreateRecordInput = Omit<
@@ -434,6 +435,7 @@ class LiveSharePointService implements SharePointDataService {
     const modelos = mergeUniqueSortedStrings([
       ...dictionary.models.map((m) => m.id),
       ...(fc?.model ?? []),
+      ...getDistinctModeloIdsFromMatrix(),
     ]);
     return { tipos, marcas, modelos };
   }
