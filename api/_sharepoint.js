@@ -297,6 +297,144 @@ export async function createListItem(config, payload) {
   });
 }
 
+const MICROSOFT_GRAPH_ROOT = 'https://graph.microsoft.com/v1.0';
+const MICROSOFT_GRAPH_SCOPE = 'https://graph.microsoft.com/.default';
+
+async function getMicrosoftGraphAccessToken(config) {
+  const tokenEndpoint = `https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`;
+  const tokenRequestBody = new URLSearchParams({
+    grant_type: 'client_credentials',
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    scope: MICROSOFT_GRAPH_SCOPE,
+  });
+
+  const tokenResponse = await fetch(tokenEndpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: tokenRequestBody.toString(),
+  });
+
+  const tokenPayload = await parseJsonResponse(tokenResponse);
+  if (!tokenResponse.ok || !tokenPayload.access_token) {
+    throw createHttpError(502, 'Unable to obtain Microsoft Graph access token', tokenPayload);
+  }
+
+  return tokenPayload.access_token;
+}
+
+function graphSiteIdentifierFromSiteUrl(siteUrlRaw) {
+  let parsed;
+  try {
+    parsed = new URL(siteUrlRaw);
+  } catch {
+    return '';
+  }
+  const host = getTextValue(parsed.hostname);
+  const path = getTextValue(parsed.pathname).replace(/\/$/, '');
+  if (!host) {
+    return '';
+  }
+  return path ? `${host}:${path}` : host;
+}
+
+function graphListMatchesConfiguredTitle(graphList, wantedTitle) {
+  const w = getTextValue(wantedTitle).toLowerCase();
+  if (!w) {
+    return false;
+  }
+  const display = getTextValue(graphList.displayName).toLowerCase();
+  const name = getTextValue(graphList.name).toLowerCase();
+  return display === w || name === w;
+}
+
+async function resolveGraphSiteId(config, graphToken) {
+  const siteKey = graphSiteIdentifierFromSiteUrl(config.siteUrl);
+  if (!siteKey) {
+    throw createHttpError(500, 'Invalid site URL for Microsoft Graph');
+  }
+  const url = `${MICROSOFT_GRAPH_ROOT}/sites/${encodeURIComponent(siteKey)}`;
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${graphToken}` },
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(502, 'Microsoft Graph site resolution failed', {
+      status: response.status,
+      response: data,
+      url,
+    });
+  }
+  const id = getTextValue(data.id);
+  if (!id) {
+    throw createHttpError(502, 'Microsoft Graph returned no site id', data);
+  }
+  return id;
+}
+
+async function resolveGraphListIdForTitle(config, graphToken, siteGraphId) {
+  const wanted = getTextValue(config.listTitle);
+  let nextUrl = `${MICROSOFT_GRAPH_ROOT}/sites/${siteGraphId}/lists?$select=id,displayName,name&$top=200`;
+
+  while (nextUrl) {
+    const response = await fetch(nextUrl, {
+      headers: { Authorization: `Bearer ${graphToken}` },
+    });
+    const data = await parseJsonResponse(response);
+    if (!response.ok) {
+      throw createHttpError(502, 'Microsoft Graph list enumeration failed', {
+        status: response.status,
+        response: data,
+      });
+    }
+    const lists = Array.isArray(data.value) ? data.value : [];
+    const match = lists.find((list) => graphListMatchesConfiguredTitle(list, wanted));
+    if (match && getTextValue(match.id)) {
+      return getTextValue(match.id);
+    }
+    const link = data['@odata.nextLink'];
+    nextUrl = typeof link === 'string' && link.trim() ? link.trim() : '';
+    if (!nextUrl) {
+      break;
+    }
+  }
+
+  throw createHttpError(404, `Microsoft Graph: no list matching title "${wanted}"`);
+}
+
+/**
+ * Actualiza columnas del ítem con Graph (PATCH .../items/{id}/fields).
+ * Respaldo cuando SharePoint REST MERGE responde 401/403 con el mismo secreto (permisos Graph vs recurso SharePoint).
+ */
+async function patchListItemFieldsViaMicrosoftGraph(config, itemId, fieldsPayload) {
+  const graphToken = await getMicrosoftGraphAccessToken(config);
+  const siteGraphId = await resolveGraphSiteId(config, graphToken);
+  const listGraphId = await resolveGraphListIdForTitle(config, graphToken, siteGraphId);
+  const itemIdStr = getTextValue(itemId);
+  if (!itemIdStr) {
+    throw createHttpError(400, 'Invalid list item id for Microsoft Graph');
+  }
+  const url = `${MICROSOFT_GRAPH_ROOT}/sites/${siteGraphId}/lists/${listGraphId}/items/${encodeURIComponent(itemIdStr)}/fields`;
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${graphToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(fieldsPayload),
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw createHttpError(502, 'Microsoft Graph list item update failed', {
+      status: response.status,
+      statusText: response.statusText,
+      response: data,
+      url,
+    });
+  }
+  return data;
+}
+
 /**
  * InternalName OData del tipo de fila de la lista (p. ej. SP.Data.IshikawaListItem).
  * Sin esto, algunos inquilinos devuelven 401 en MERGE aunque el POST de alta funcione.
@@ -371,11 +509,26 @@ export async function mergeListItem(config, itemId, payload) {
   const responsePayload = await parseJsonResponse(response);
   if (!response.ok) {
     const upstreamStatus = response.status;
-    const statusCode =
-      upstreamStatus === 401 || upstreamStatus === 403 ? upstreamStatus : 502;
+    if (upstreamStatus === 401 || upstreamStatus === 403) {
+      try {
+        await patchListItemFieldsViaMicrosoftGraph(config, id, payload);
+        return {};
+      } catch (graphError) {
+        throw createHttpError(502, 'Could not update the list item. SharePoint REST returned 401/403 and Microsoft Graph fallback failed. Add Microsoft Graph application permissions (Sites.ReadWrite.All or Sites.Selected with this site granted) alongside SharePoint permissions for the same app registration.', {
+          sharePointRest: {
+            status: upstreamStatus,
+            statusText: response.statusText,
+            response: responsePayload,
+            request: { method: 'MERGE', url },
+          },
+          graphFallback: graphError.details ?? { message: graphError.message },
+        });
+      }
+    }
+    const statusCode = upstreamStatus === 400 || upstreamStatus === 404 ? upstreamStatus : 502;
     const message =
-      upstreamStatus === 401 || upstreamStatus === 403
-        ? 'SharePoint denied updating the list item. Check SharePoint application permissions for this site (Sites.ReadWrite.All or Sites.Selected with admin grant) and client secret validity.'
+      upstreamStatus === 400 || upstreamStatus === 404
+        ? 'SharePoint rejected the merge payload (invalid field or item).'
         : 'SharePoint merge request failed';
     throw createHttpError(statusCode, message, {
       status: upstreamStatus,
