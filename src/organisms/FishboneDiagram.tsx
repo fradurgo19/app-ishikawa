@@ -120,7 +120,7 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
       </p>
       <div className="overflow-y-auto overflow-x-auto pb-8 pt-4 max-h-[min(85vh,1200px)]">
         {fishboneData.length > 0 ? (
-          <div className="flex flex-col items-center min-w-min gap-0 px-2">
+          <div className="flex min-w-min flex-col items-center gap-6 px-2">
             <div
               className="flex shrink-0 flex-col items-center gap-2 rounded-lg border-2 border-red-300 bg-red-50 px-4 py-3 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
               title="Efecto / foco del análisis"
@@ -134,7 +134,7 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
             {fishboneData.map((node, index) => (
               <React.Fragment key={node.id}>
                 {index > 0 && <div className="h-10 w-px shrink-0 bg-gray-400" aria-hidden />}
-                <div className="flex w-full max-w-5xl shrink-0 flex-col items-center">
+                <div className="flex w-full max-w-5xl shrink-0 flex-col items-center py-2">
                   <FishboneBranch
                     node={node}
                     onToggle={toggleNode}
@@ -229,7 +229,7 @@ function FishboneRibColumn({
 
   if (placement === 'upper') {
     return (
-      <div className="flex w-full flex-row flex-wrap items-center justify-end gap-1 sm:flex-nowrap">
+      <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-end gap-2 py-2 sm:flex-nowrap sm:gap-3">
         {branch}
         {connector}
       </div>
@@ -237,7 +237,7 @@ function FishboneRibColumn({
   }
 
   return (
-    <div className="flex w-full flex-row flex-wrap items-center justify-start gap-1 sm:flex-nowrap">
+    <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-start gap-2 py-2 sm:flex-nowrap sm:gap-3">
       {connector}
       {branch}
     </div>
@@ -256,9 +256,9 @@ function FishboneBranch({
   const Icon = getNodeIcon(node.type);
 
   return (
-    <div className="flex w-full flex-col items-stretch gap-6 md:flex-row md:items-center md:justify-center md:gap-3">
+    <div className="flex w-full min-w-0 flex-col items-stretch gap-8 md:flex-row md:items-center md:justify-center md:gap-x-8 md:gap-y-4 lg:gap-x-10">
       {node.expanded && upper.length > 0 && (
-        <div className="order-2 flex w-full flex-col gap-4 md:order-1 md:max-w-[42%] md:min-w-0 md:w-auto md:items-end">
+        <div className="order-2 flex w-full min-w-0 flex-col gap-6 md:order-1 md:max-w-[42%] md:items-end">
           {upper.map((child) => (
             <FishboneRibColumn
               key={child.id}
@@ -272,7 +272,7 @@ function FishboneBranch({
         </div>
       )}
 
-      <div className="relative z-10 order-1 flex shrink-0 flex-row items-center justify-center md:order-2">
+      <div className="order-1 flex shrink-0 flex-row items-center justify-center md:order-2">
         <FishboneNodeButton
           node={node}
           hasChildren={hasChildren}
@@ -283,7 +283,7 @@ function FishboneBranch({
       </div>
 
       {node.expanded && lower.length > 0 && (
-        <div className="order-3 flex w-full flex-col gap-4 md:max-w-[42%] md:min-w-0 md:w-auto md:items-start">
+        <div className="order-3 flex w-full min-w-0 flex-col gap-6 md:max-w-[42%] md:items-start">
           {lower.map((child) => (
             <FishboneRibColumn
               key={child.id}
