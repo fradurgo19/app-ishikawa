@@ -402,14 +402,37 @@ async function resolveGraphListIdForTitle(config, graphToken, siteGraphId) {
   throw createHttpError(404, `Microsoft Graph: no list matching title "${wanted}"`);
 }
 
+const graphSiteListIdCache = new Map();
+const GRAPH_SITE_LIST_CACHE_TTL_MS = 50 * 60 * 1000;
+
+function graphSiteListCacheKey(config) {
+  return `${getTextValue(config.siteUrl)}|${getTextValue(config.listTitle)}`;
+}
+
+async function resolveGraphSiteAndListIdsCached(config, graphToken) {
+  const key = graphSiteListCacheKey(config);
+  const now = Date.now();
+  const cached = graphSiteListIdCache.get(key);
+  if (cached && cached.expiresAt > now) {
+    return { siteGraphId: cached.siteGraphId, listGraphId: cached.listGraphId };
+  }
+  const siteGraphId = await resolveGraphSiteId(config, graphToken);
+  const listGraphId = await resolveGraphListIdForTitle(config, graphToken, siteGraphId);
+  graphSiteListIdCache.set(key, {
+    siteGraphId,
+    listGraphId,
+    expiresAt: now + GRAPH_SITE_LIST_CACHE_TTL_MS,
+  });
+  return { siteGraphId, listGraphId };
+}
+
 /**
  * Actualiza columnas del ítem con Graph (PATCH .../items/{id}/fields).
- * Respaldo cuando SharePoint REST MERGE responde 401/403 con el mismo secreto (permisos Graph vs recurso SharePoint).
+ * Misma idea que el cliente (Graph): muchos tenants aceptan Graph con app-only aunque REST MERGE devuelva 401.
  */
 async function patchListItemFieldsViaMicrosoftGraph(config, itemId, fieldsPayload) {
   const graphToken = await getMicrosoftGraphAccessToken(config);
-  const siteGraphId = await resolveGraphSiteId(config, graphToken);
-  const listGraphId = await resolveGraphListIdForTitle(config, graphToken, siteGraphId);
+  const { siteGraphId, listGraphId } = await resolveGraphSiteAndListIdsCached(config, graphToken);
   const itemIdStr = getTextValue(itemId);
   if (!itemIdStr) {
     throw createHttpError(400, 'Invalid list item id for Microsoft Graph');
@@ -466,14 +489,53 @@ async function tryGetListItemEntityTypeFullName(config, accessToken) {
   }
 }
 
-/** Actualiza campos del ítem (MERGE); alineado con documentación MS (digest + __metadata cuando aplica). */
-export async function mergeListItem(config, itemId, payload) {
+function sharePointMergeFailureStatusAndMessage(upstreamStatus) {
+  if (upstreamStatus === 400 || upstreamStatus === 404) {
+    return {
+      statusCode: upstreamStatus,
+      message: 'SharePoint rejected the merge payload (invalid field or item).',
+    };
+  }
+  if (upstreamStatus === 401 || upstreamStatus === 403) {
+    return {
+      statusCode: upstreamStatus,
+      message: 'SharePoint REST denied the merge (401/403).',
+    };
+  }
+  return {
+    statusCode: 502,
+    message: 'SharePoint merge request failed',
+  };
+}
+
+function buildSharePointMergeRequestBody(useVerboseMetadata, entityType, payload) {
+  if (useVerboseMetadata) {
+    return { __metadata: { type: entityType }, ...payload };
+  }
+  return payload;
+}
+
+function buildSharePointMergeRequestHeaders(accessToken, useVerboseMetadata, digest) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: useVerboseMetadata ? 'application/json;odata=verbose' : 'application/json;odata=nometadata',
+    'Content-Type': useVerboseMetadata ? 'application/json' : 'application/json;odata=nometadata',
+    'IF-MATCH': '*',
+    'X-HTTP-Method': 'MERGE',
+  };
+  if (digest) {
+    headers['X-RequestDigest'] = digest;
+  }
+  return headers;
+}
+
+/**
+ * MERGE vía SharePoint REST (respaldo). El alta usa POST /items; aquí POST + X-HTTP-Method: MERGE.
+ */
+async function mergeListItemViaSharePointRest(config, itemId, payload) {
   const accessToken = await getAccessToken(config);
   const encodedListTitle = escapeODataString(config.listTitle);
   const id = Number(itemId);
-  if (!Number.isInteger(id) || id < 1) {
-    throw createHttpError(400, 'Invalid list item id');
-  }
   const url = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items(${id})`;
 
   const entityType = await tryGetListItemEntityTypeFullName(config, accessToken);
@@ -486,20 +548,8 @@ export async function mergeListItem(config, itemId, payload) {
   }
 
   const useVerboseMetadata = Boolean(entityType);
-  const bodyObject = useVerboseMetadata
-    ? { __metadata: { type: entityType }, ...payload }
-    : payload;
-
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
-    Accept: useVerboseMetadata ? 'application/json;odata=verbose' : 'application/json;odata=nometadata',
-    'Content-Type': useVerboseMetadata ? 'application/json' : 'application/json;odata=nometadata',
-    'IF-MATCH': '*',
-    'X-HTTP-Method': 'MERGE',
-  };
-  if (digest) {
-    headers['X-RequestDigest'] = digest;
-  }
+  const bodyObject = buildSharePointMergeRequestBody(useVerboseMetadata, entityType, payload);
+  const headers = buildSharePointMergeRequestHeaders(accessToken, useVerboseMetadata, digest);
 
   const response = await fetch(url, {
     method: 'POST',
@@ -509,27 +559,7 @@ export async function mergeListItem(config, itemId, payload) {
   const responsePayload = await parseJsonResponse(response);
   if (!response.ok) {
     const upstreamStatus = response.status;
-    if (upstreamStatus === 401 || upstreamStatus === 403) {
-      try {
-        await patchListItemFieldsViaMicrosoftGraph(config, id, payload);
-        return {};
-      } catch (graphError) {
-        throw createHttpError(502, 'Could not update the list item. SharePoint REST returned 401/403 and Microsoft Graph fallback failed. Add Microsoft Graph application permissions (Sites.ReadWrite.All or Sites.Selected with this site granted) alongside SharePoint permissions for the same app registration.', {
-          sharePointRest: {
-            status: upstreamStatus,
-            statusText: response.statusText,
-            response: responsePayload,
-            request: { method: 'MERGE', url },
-          },
-          graphFallback: graphError.details ?? { message: graphError.message },
-        });
-      }
-    }
-    const statusCode = upstreamStatus === 400 || upstreamStatus === 404 ? upstreamStatus : 502;
-    const message =
-      upstreamStatus === 400 || upstreamStatus === 404
-        ? 'SharePoint rejected the merge payload (invalid field or item).'
-        : 'SharePoint merge request failed';
+    const { statusCode, message } = sharePointMergeFailureStatusAndMessage(upstreamStatus);
     throw createHttpError(statusCode, message, {
       status: upstreamStatus,
       statusText: response.statusText,
@@ -539,6 +569,39 @@ export async function mergeListItem(config, itemId, payload) {
     });
   }
   return responsePayload;
+}
+
+/**
+ * Actualiza campos del ítem: primero Microsoft Graph (como en el flujo de lectura del SPA), luego MERGE REST.
+ * Así se evita el 401 de MERGE en tenants donde el POST de alta y los adjuntos REST sí funcionan.
+ */
+export async function mergeListItem(config, itemId, payload) {
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw createHttpError(400, 'Invalid list item id');
+  }
+
+  const fieldKeys = Object.keys(payload || {});
+  if (fieldKeys.length === 0) {
+    return {};
+  }
+
+  let graphError = null;
+  try {
+    await patchListItemFieldsViaMicrosoftGraph(config, id, payload);
+    return {};
+  } catch (err) {
+    graphError = err;
+  }
+
+  try {
+    return await mergeListItemViaSharePointRest(config, itemId, payload);
+  } catch (restError) {
+    throw createHttpError(502, 'Could not update list item fields. Microsoft Graph failed first; SharePoint REST MERGE also failed.', {
+      graphAttempt: graphError?.details ?? { message: graphError?.message ?? String(graphError) },
+      sharePointRestAttempt: restError?.details ?? { message: restError?.message ?? String(restError) },
+    });
+  }
 }
 
 export async function fetchListItemById(config, itemId, options = {}) {
@@ -748,6 +811,57 @@ export function mapListItemToMachineRecord(item, fieldMap, siteOrigin = '') {
   return mappedRecord;
 }
 
+function putTipoEquipoOnPayload(payload, fieldMap, record) {
+  if (!fieldMap.tipoEquipo) {
+    return;
+  }
+  payload[fieldMap.tipoEquipo] = normalizeRequiredText(record.tipoEquipoId, 'tipoEquipoId');
+}
+
+function putTimeOnPayload(payload, fieldMap, record) {
+  if (!fieldMap.time) {
+    return;
+  }
+  payload[fieldMap.time] = normalizeTime(record.time);
+}
+
+function putResourceOnPayload(payload, fieldMap, record) {
+  const resource = getTextValue(record.resource);
+  if (!fieldMap.resource || !resource) {
+    return;
+  }
+  payload[fieldMap.resource] = resource;
+}
+
+function putCreatedByOnPayloadForCreate(payload, fieldMap, record, isMerge) {
+  if (isMerge) {
+    return;
+  }
+  const createdBy = getTextValue(record.createdBy);
+  if (!fieldMap.createdBy || !createdBy) {
+    return;
+  }
+  payload[fieldMap.createdBy] = createdBy;
+}
+
+function putAttachmentColumnsOnPayload(payload, fieldMap, normalizedAttachment) {
+  if (!normalizedAttachment) {
+    return;
+  }
+  if (fieldMap.attachmentName) {
+    payload[fieldMap.attachmentName] = normalizedAttachment.name;
+  }
+  if (fieldMap.attachmentUrl) {
+    payload[fieldMap.attachmentUrl] = normalizedAttachment.url;
+  }
+  if (fieldMap.attachmentType) {
+    payload[fieldMap.attachmentType] = normalizedAttachment.type;
+  }
+  if (fieldMap.attachmentSize) {
+    payload[fieldMap.attachmentSize] = normalizedAttachment.size;
+  }
+}
+
 /**
  * @param {{ isMerge?: boolean }} [options]
  * @param {boolean} [options.isMerge] — Actualización de ítem (MERGE). Omite columnas que SharePoint suele rechazar al actualizar (p. ej. autor / creado por).
@@ -763,41 +877,13 @@ export function buildRecordPayload(record, fieldMap, options) {
     [fieldMap.activity]: normalizeRequiredText(record.activityId, 'activityId'),
   };
 
-  if (fieldMap.tipoEquipo) {
-    payload[fieldMap.tipoEquipo] = normalizeRequiredText(record.tipoEquipoId, 'tipoEquipoId');
-  }
-
-  if (fieldMap.time) {
-    payload[fieldMap.time] = normalizeTime(record.time);
-  }
-
-  const resource = getTextValue(record.resource);
-  if (fieldMap.resource && resource) {
-    payload[fieldMap.resource] = resource;
-  }
-
-  if (!isMerge) {
-    const createdBy = getTextValue(record.createdBy);
-    if (fieldMap.createdBy && createdBy) {
-      payload[fieldMap.createdBy] = createdBy;
-    }
-  }
+  putTipoEquipoOnPayload(payload, fieldMap, record);
+  putTimeOnPayload(payload, fieldMap, record);
+  putResourceOnPayload(payload, fieldMap, record);
+  putCreatedByOnPayloadForCreate(payload, fieldMap, record, isMerge);
 
   const normalizedAttachment = normalizeAttachment(record.attachment);
-  if (normalizedAttachment) {
-    if (fieldMap.attachmentName) {
-      payload[fieldMap.attachmentName] = normalizedAttachment.name;
-    }
-    if (fieldMap.attachmentUrl) {
-      payload[fieldMap.attachmentUrl] = normalizedAttachment.url;
-    }
-    if (fieldMap.attachmentType) {
-      payload[fieldMap.attachmentType] = normalizedAttachment.type;
-    }
-    if (fieldMap.attachmentSize) {
-      payload[fieldMap.attachmentSize] = normalizedAttachment.size;
-    }
-  }
+  putAttachmentColumnsOnPayload(payload, fieldMap, normalizedAttachment);
 
   return payload;
 }
