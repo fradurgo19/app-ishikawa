@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../atoms/Button';
-import { Settings, LogOut, Home, Plus, BarChart3, GitBranch, ChevronDown } from 'lucide-react';
+import { Settings, LogOut, Home, Plus, BarChart3, ChevronDown } from 'lucide-react';
 
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -20,7 +20,6 @@ export const Navbar: React.FC = () => {
     { path: '/selector', label: 'Inicio', icon: Home },
     { path: '/new-record', label: 'Nuevo Registro', icon: Plus, coordinatorOnly: true },
     { path: '/data-table', label: 'Tabla de Datos', icon: BarChart3 },
-    { path: '/fishbone', label: 'Ishikawa', icon: GitBranch },
   ];
 
   const visibleNavItems = navItems.filter(

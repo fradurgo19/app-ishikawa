@@ -459,6 +459,7 @@ const RecordActionsCell: React.FC<RecordActionsCellProps> = ({ record, onEdit })
       </button>
       <Link
         to={to}
+        state={{ fromDataTable: true }}
         className="inline-flex items-center gap-1 text-sm font-medium text-red-700 hover:text-red-900 hover:underline"
       >
         <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden />

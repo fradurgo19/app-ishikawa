@@ -11,9 +11,8 @@ import {
   getDistinctTiposEquipo,
   getMarcasForTipoEquipo,
   getModelosForTipoYMarca,
-  isValidEquipmentCombination,
 } from '../data/equipmentMatrix';
-import { Factory, Settings, AlertTriangle, BarChart, Plus, Eye, Truck } from 'lucide-react';
+import { Factory, Settings, AlertTriangle, BarChart, Plus, BarChart3, Truck } from 'lucide-react';
 
 export const SelectorPage: React.FC = () => {
   const [selectedCard, setSelectedCard] = useState<'brand' | 'model' | 'problem' | null>(null);
@@ -84,22 +83,6 @@ export const SelectorPage: React.FC = () => {
       setSections([]);
     }
   }, [selectedBrand, selectedModel, loadSections]);
-
-  const handleViewFishbone = () => {
-    const params = new URLSearchParams();
-    if (selectedTipoEquipo) params.set('tipoEquipo', selectedTipoEquipo);
-    if (selectedBrand) params.set('brand', selectedBrand);
-    if (selectedModel) params.set('model', selectedModel);
-    if (problemSearch) params.set('problem', problemSearch);
-
-    navigate(`/fishbone?${params.toString()}`);
-  };
-
-  const matrixComboValid =
-    Boolean(selectedTipoEquipo && selectedBrand && selectedModel) &&
-    isValidEquipmentCombination(selectedTipoEquipo, selectedBrand, selectedModel);
-
-  const canViewFishbone = Boolean(problemSearch || matrixComboValid);
 
   const scrollCriteriosAndRun = useCallback((action: () => void) => {
     queueMicrotask(() => {
@@ -274,14 +257,18 @@ export const SelectorPage: React.FC = () => {
             </div>
           )}
 
-          <div className="flex gap-4 mt-6 pt-6 border-t">
-            <Button onClick={handleViewFishbone} disabled={!canViewFishbone} icon={Eye}>
-              Ver Diagrama Ishikawa
-            </Button>
-
-            <Button variant="outline" onClick={() => navigate('/new-record')} icon={Plus}>
-              Crear Nuevo Registro
-            </Button>
+          <div className="mt-6 space-y-3 border-t pt-6">
+            <div className="flex flex-wrap gap-4">
+              <Button onClick={() => navigate('/data-table')} icon={BarChart3}>
+                Ir a tabla de datos
+              </Button>
+              <Button variant="outline" onClick={() => navigate('/new-record')} icon={Plus}>
+                Crear Nuevo Registro
+              </Button>
+            </div>
+            <p className="text-xs text-gray-500 max-w-xl">
+              El diagrama Ishikawa solo se abre desde la tabla de datos (enlace «Diagrama» en cada registro).
+            </p>
           </div>
         </section>
       </div>

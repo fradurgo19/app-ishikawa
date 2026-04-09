@@ -1,12 +1,26 @@
 import React from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import { FishboneDiagram } from '../organisms/FishboneDiagram';
 import { Button } from '../atoms/Button';
 import { ArrowLeft } from 'lucide-react';
 
+function isFromDataTableState(state: unknown): boolean {
+  return (
+    typeof state === 'object' &&
+    state !== null &&
+    'fromDataTable' in state &&
+    (state as { fromDataTable?: boolean }).fromDataTable === true
+  );
+}
+
 export const FishbonePage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  if (!isFromDataTableState(location.state)) {
+    return <Navigate to="/data-table" replace />;
+  }
 
   const selectedTipoEquipo = normalizeQueryParam(searchParams.get('tipoEquipo'));
   const selectedBrand = normalizeQueryParam(searchParams.get('brand'));
@@ -20,9 +34,9 @@ export const FishbonePage: React.FC = () => {
           <Button
             variant="ghost"
             icon={ArrowLeft}
-            onClick={() => navigate('/selector')}
+            onClick={() => navigate('/data-table')}
           >
-            Volver al Selector
+            Volver a la tabla de datos
           </Button>
           
           <div>
