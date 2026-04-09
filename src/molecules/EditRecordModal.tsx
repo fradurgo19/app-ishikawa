@@ -44,6 +44,38 @@ function attachmentKey(att: Attachment, index: number): string {
   return `${att.id}-${name}-${index}`;
 }
 
+const RE_ATTACHMENT_PATH_WITH_NUMERIC_ITEM = /\/Attachments\/\d+\/([^/?#]+)/i;
+const RE_ATTACHMENT_PATH_GENERIC = /\/Attachments\/[^/]+\/([^/?#]+)/i;
+
+function decodeUriPathSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
+
+/**
+ * SharePoint REST borra por FileName exacto. Graph a veces expone name genérico "Adjunto";
+ * el nombre real suele ir al final de la URL clásica .../Attachments/{itemId}/{fileName}.
+ */
+function attachmentFileNameForSharePointDelete(att: Attachment): string {
+  const n = (att.name ?? '').trim();
+  if (n.length > 0 && n.toLowerCase() !== 'adjunto') {
+    return n;
+  }
+  const u = (att.url ?? '').trim();
+  let m = RE_ATTACHMENT_PATH_WITH_NUMERIC_ITEM.exec(u);
+  if (m?.[1]) {
+    return decodeUriPathSegment(m[1]);
+  }
+  m = RE_ATTACHMENT_PATH_GENERIC.exec(u);
+  if (m?.[1]) {
+    return decodeUriPathSegment(m[1]);
+  }
+  return n;
+}
+
 export const EditRecordModal: React.FC<EditRecordModalProps> = ({
   isOpen,
   record,
@@ -121,7 +153,7 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
     });
     const initialList = resolveRecordAttachments(record);
     initialAttachmentNamesRef.current = new Set(
-      initialList.map((a) => (a.name ?? '').trim()).filter(Boolean)
+      initialList.map((a) => attachmentFileNameForSharePointDelete(a)).filter(Boolean)
     );
     setExistingAttachments(initialList);
     setNewStagedFiles([]);
@@ -174,7 +206,7 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
       setSaving(true);
       try {
         const keptNames = new Set(
-          existingAttachments.map((a) => (a.name ?? '').trim()).filter(Boolean)
+          existingAttachments.map((a) => attachmentFileNameForSharePointDelete(a)).filter(Boolean)
         );
         const removeAttachmentFileNames = [...initialAttachmentNamesRef.current].filter(
           (n) => !keptNames.has(n)

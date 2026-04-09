@@ -261,6 +261,40 @@ function machineRecordToGraphCreateInput(record: MachineRecord): GraphCreateReco
   };
 }
 
+function normalizeListItemId(raw: MachineRecord['id'] | number | undefined | null): string {
+  if (raw === undefined || raw === null) {
+    return '';
+  }
+  return String(raw).trim();
+}
+
+/**
+ * Cuerpo `record` para PATCH /api/ishikawa: alineado con el POST de alta (solo campos persistibles).
+ * No incluye `attachments[]`, `createdAt` ni `updatedAt` para evitar cuerpos redundantes y diferencias con createRecord.
+ */
+function toIshikawaPatchRecordBody(record: MachineRecord): Record<string, unknown> {
+  const normalized = normalizeCreateRecordInput(
+    machineRecordToGraphCreateInput(record) as CreateRecordFieldsInput
+  );
+  const body: Record<string, unknown> = {
+    id: normalizeListItemId(record.id),
+    tipoEquipoId: normalized.tipoEquipoId,
+    brandId: normalized.brandId,
+    modelId: normalized.modelId,
+    sectionId: normalized.sectionId,
+    problem: normalized.problem,
+    activityTypeId: normalized.activityTypeId,
+    activityId: normalized.activityId,
+    resource: normalized.resource,
+    time: normalized.time,
+    createdBy: normalized.createdBy,
+  };
+  if (normalized.attachment) {
+    body.attachment = normalized.attachment;
+  }
+  return body;
+}
+
 class LiveSharePointService implements SharePointDataService {
   private dictionaryCache: Promise<DictionaryResponse> | null = null;
 
@@ -695,10 +729,6 @@ class LiveSharePointService implements SharePointDataService {
     record: MachineRecord,
     attachmentOptions: UpdateRecordAttachmentOptions
   ): Promise<MachineRecord> {
-    const id = record.id.trim();
-    const normalizedFields = normalizeCreateRecordInput(
-      machineRecordToGraphCreateInput(record) as CreateRecordFieldsInput
-    );
     const addFiles = attachmentOptions.addFiles ?? [];
     const payloads = addFiles.length > 0 ? await filesToAttachmentPayloads(addFiles) : [];
     const removeNames = (attachmentOptions.removeAttachmentFileNames ?? [])
@@ -706,7 +736,7 @@ class LiveSharePointService implements SharePointDataService {
       .filter(Boolean);
 
     const body: Record<string, unknown> = {
-      record: { ...record, ...normalizedFields, id },
+      record: toIshikawaPatchRecordBody(record),
     };
     if (payloads.length > 0) {
       body.attachmentFiles = payloads;
@@ -727,7 +757,7 @@ class LiveSharePointService implements SharePointDataService {
     record: MachineRecord,
     attachmentOptions?: UpdateRecordAttachmentOptions
   ): Promise<MachineRecord> {
-    const id = record.id?.trim();
+    const id = normalizeListItemId(record.id);
     if (!id) {
       throw new Error('El registro debe tener id para actualizar.');
     }
@@ -769,7 +799,7 @@ class LiveSharePointService implements SharePointDataService {
 
     const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
       method: 'PATCH',
-      body: JSON.stringify({ record: { ...record, ...normalizedFields, id } }),
+      body: JSON.stringify({ record: toIshikawaPatchRecordBody(record) }),
     });
     this.invalidateCaches();
     return normalizeRecord(response.record);
