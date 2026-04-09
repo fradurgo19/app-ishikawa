@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Button } from '../atoms/Button';
 import { Input } from '../atoms/Input';
 import { Textarea } from '../atoms/Textarea';
 import { Select } from '../atoms/Select';
 import { sharePointService } from '../services/sharePointService';
-import { MachineRecord, Section, ActivityType } from '../types';
-import { X } from 'lucide-react';
+import { Attachment, MachineRecord, Section, ActivityType } from '../types';
+import { Download, Trash2, X } from 'lucide-react';
 
 interface EditFormData {
   tipoEquipoId: string;
@@ -28,6 +28,21 @@ export interface EditRecordModalProps {
 }
 
 const toSelectOptions = (labels: string[]) => labels.map((t) => ({ value: t, label: t }));
+
+function resolveRecordAttachments(source: MachineRecord): Attachment[] {
+  if (source.attachments && source.attachments.length > 0) {
+    return [...source.attachments];
+  }
+  if (source.attachment) {
+    return [source.attachment];
+  }
+  return [];
+}
+
+function attachmentKey(att: Attachment, index: number): string {
+  const name = att.name?.trim() ?? '';
+  return `${att.id}-${name}-${index}`;
+}
 
 export const EditRecordModal: React.FC<EditRecordModalProps> = ({
   isOpen,
@@ -57,6 +72,12 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [existingAttachments, setExistingAttachments] = useState<Attachment[]>([]);
+  const [newStagedFiles, setNewStagedFiles] = useState<File[]>([]);
+
+  const initialAttachmentNamesRef = useRef<Set<string>>(new Set());
+  const newFilesInputId = useId();
+  const newFilesInputRef = useRef<HTMLInputElement>(null);
 
   const brandWatch = watch('brandId');
   const modelWatch = watch('modelId');
@@ -98,6 +119,12 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
       resource: record.resource ?? '',
       time: Number.isFinite(record.time) ? record.time : 0,
     });
+    const initialList = resolveRecordAttachments(record);
+    initialAttachmentNamesRef.current = new Set(
+      initialList.map((a) => (a.name ?? '').trim()).filter(Boolean)
+    );
+    setExistingAttachments(initialList);
+    setNewStagedFiles([]);
   }, [isOpen, record, loadOptions, reset]);
 
   useEffect(() => {
@@ -116,6 +143,29 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
     };
   }, [isOpen, brandWatch, modelWatch]);
 
+  const appendNewFiles = useCallback((picked: File[]) => {
+    if (picked.length === 0) {
+      return;
+    }
+    setNewStagedFiles((prev) => [...prev, ...picked]);
+  }, []);
+
+  const removeNewFileAt = useCallback((index: number) => {
+    setNewStagedFiles((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const removeExistingAttachment = useCallback((index: number) => {
+    setExistingAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  const handleNewFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target;
+    const list = input.files;
+    const picked = list && list.length > 0 ? Array.from(list) : [];
+    input.value = '';
+    appendNewFiles(picked);
+  };
+
   const onSubmit = useCallback(
     async (data: EditFormData) => {
       if (!record) {
@@ -123,7 +173,17 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
       }
       setSaving(true);
       try {
-        const updated = await sharePointService.updateRecord({
+        const keptNames = new Set(
+          existingAttachments.map((a) => (a.name ?? '').trim()).filter(Boolean)
+        );
+        const removeAttachmentFileNames = [...initialAttachmentNamesRef.current].filter(
+          (n) => !keptNames.has(n)
+        );
+
+        const hasAttachmentOps =
+          removeAttachmentFileNames.length > 0 || newStagedFiles.length > 0;
+
+        const baseUpdate: MachineRecord = {
           ...record,
           tipoEquipoId: data.tipoEquipoId,
           brandId: data.brandId,
@@ -134,7 +194,27 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
           activityId: data.activityId,
           resource: data.resource,
           time: Number(data.time),
-        });
+          ...(existingAttachments.length > 0
+            ? {
+                attachment: existingAttachments[0],
+                attachments: existingAttachments,
+              }
+            : {
+                attachment: undefined,
+                attachments: undefined,
+              }),
+        };
+
+        const updated = await sharePointService.updateRecord(
+          baseUpdate,
+          hasAttachmentOps
+            ? {
+                addFiles: newStagedFiles.length > 0 ? newStagedFiles : undefined,
+                removeAttachmentFileNames:
+                  removeAttachmentFileNames.length > 0 ? removeAttachmentFileNames : undefined,
+              }
+            : undefined
+        );
         onSaved(updated);
         onClose();
       } catch (e) {
@@ -144,7 +224,7 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
         setSaving(false);
       }
     },
-    [record, onSaved, onClose]
+    [record, existingAttachments, newStagedFiles, onSaved, onClose]
   );
 
   if (!isOpen || !record) {
@@ -273,9 +353,96 @@ export const EditRecordModal: React.FC<EditRecordModalProps> = ({
             error={errors.time?.message}
           />
 
-          <p className="text-xs text-gray-500">
-            Los adjuntos existentes no se modifican desde aquí; usa Nuevo registro o SharePoint para añadir archivos.
-          </p>
+          <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+            <h3 className="text-sm font-medium text-gray-900">Adjuntos</h3>
+            <p className="text-xs text-gray-600">
+              Puedes quitar archivos actuales o añadir nuevos. Los cambios se aplican al guardar (SharePoint lista
+              nativa).
+            </p>
+
+            {existingAttachments.length > 0 ? (
+              <ul className="m-0 list-none space-y-2 p-0">
+                {existingAttachments.map((att, index) => {
+                  const href = att.url?.trim();
+                  const label = att.name?.trim() || 'Adjunto';
+                  return (
+                    <li
+                      key={attachmentKey(att, index)}
+                      className="flex items-center justify-between gap-2 rounded border border-gray-200 bg-white px-3 py-2 text-sm"
+                    >
+                      <span className="min-w-0 flex-1 truncate" title={label}>
+                        {href ? (
+                          <a
+                            href={href}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex max-w-full items-center gap-1 text-blue-600 hover:underline"
+                          >
+                            <Download className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            <span className="truncate">{label}</span>
+                          </a>
+                        ) : (
+                          <span className="text-gray-800">{label}</span>
+                        )}
+                      </span>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded p-1 text-red-600 hover:bg-red-50"
+                        aria-label={`Quitar adjunto ${label}`}
+                        onClick={() => removeExistingAttachment(index)}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden />
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="text-xs text-gray-500">No hay adjuntos en este registro.</p>
+            )}
+
+            <div className="space-y-2">
+              <label htmlFor={newFilesInputId} className="block text-sm font-medium text-gray-700">
+                Añadir archivos
+              </label>
+              <input
+                id={newFilesInputId}
+                ref={newFilesInputRef}
+                type="file"
+                multiple
+                accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                className="hidden"
+                tabIndex={-1}
+                onChange={handleNewFilesChange}
+              />
+              <button
+                type="button"
+                className="inline-flex rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-50"
+                onClick={() => newFilesInputRef.current?.click()}
+              >
+                Elegir archivos
+              </button>
+              {newStagedFiles.length > 0 ? (
+                <ul className="m-0 list-none space-y-1 rounded border border-gray-200 bg-white p-2 text-sm">
+                  {newStagedFiles.map((file, index) => (
+                    <li key={`${file.name}-${file.size}-${index}`} className="flex items-center justify-between gap-2">
+                      <span className="truncate" title={file.name}>
+                        {file.name}
+                      </span>
+                      <button
+                        type="button"
+                        className="shrink-0 rounded p-1 text-red-600 hover:bg-red-50"
+                        aria-label={`Quitar ${file.name} de la lista`}
+                        onClick={() => removeNewFileAt(index)}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          </div>
 
           <div className="flex flex-wrap gap-3 border-t border-gray-200 pt-4">
             <Button type="submit" loading={saving}>

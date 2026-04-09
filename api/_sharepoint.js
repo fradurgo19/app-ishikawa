@@ -409,6 +409,60 @@ export async function uploadListItemNativeAttachments(config, itemId, attachment
   }
 }
 
+/**
+ * Elimina un archivo de la columna nativa Attachments del ítem (SharePoint REST DELETE).
+ * Ignora 404 si el adjunto ya no existe.
+ */
+export async function deleteListItemNativeAttachment(config, itemId, fileName) {
+  const accessToken = await getAccessToken(config);
+  const encodedListTitle = escapeODataString(config.listTitle);
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw createHttpError(400, 'Invalid list item id');
+  }
+  const name = getTextValue(fileName);
+  if (!name) {
+    throw createHttpError(400, 'Attachment file name is required for delete');
+  }
+  const safeName = escapeODataString(name);
+  const deleteUrl = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items(${id})/AttachmentFiles('${safeName}')`;
+
+  let digest;
+  try {
+    digest = await getSharePointFormDigest(config, accessToken);
+  } catch {
+    digest = undefined;
+  }
+
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/json;odata=nometadata',
+    'IF-MATCH': '*',
+  };
+  if (digest) {
+    headers['X-RequestDigest'] = digest;
+  }
+
+  const response = await fetch(deleteUrl, {
+    method: 'DELETE',
+    headers,
+  });
+
+  if (response.status === 404) {
+    return;
+  }
+
+  if (!response.ok) {
+    const responsePayload = await parseJsonResponse(response);
+    throw createHttpError(502, 'SharePoint attachment delete failed', {
+      status: response.status,
+      statusText: response.statusText,
+      response: responsePayload,
+      fileName: name,
+    });
+  }
+}
+
 function getItemFieldText(item, internalName) {
   const key = getTextValue(internalName);
   if (!key || !item || typeof item !== 'object') {

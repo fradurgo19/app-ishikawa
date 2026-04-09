@@ -69,6 +69,12 @@ interface RecordResponse {
   record: MachineRecord;
 }
 
+/** Opciones para modificar adjuntos nativos al actualizar (PATCH /api con credenciales de aplicación). */
+export interface UpdateRecordAttachmentOptions {
+  addFiles?: File[];
+  removeAttachmentFileNames?: string[];
+}
+
 interface SharePointDataService {
   getBrands: () => Promise<Brand[]>;
   getModels: (brandId?: string) => Promise<Model[]>;
@@ -88,7 +94,10 @@ interface SharePointDataService {
   getRecords: (filters?: Partial<MachineRecord>) => Promise<MachineRecord[]>;
   createRecord: (record: CreateRecordInput) => Promise<MachineRecord>;
   /** Actualiza un ítem existente (Graph delegado o PATCH /api/ishikawa). */
-  updateRecord: (record: MachineRecord) => Promise<MachineRecord>;
+  updateRecord: (
+    record: MachineRecord,
+    attachmentOptions?: UpdateRecordAttachmentOptions
+  ) => Promise<MachineRecord>;
   getKPIs: () => Promise<KPIData>;
   refreshDictionary?: () => Promise<void>;
 }
@@ -682,11 +691,54 @@ class LiveSharePointService implements SharePointDataService {
     return this.createRecordThenUploadAttachmentsViaRest(normalized, files!, ctx!, sharePointRestToken!);
   }
 
-  async updateRecord(record: MachineRecord): Promise<MachineRecord> {
+  private async updateRecordViaApiWithAttachments(
+    record: MachineRecord,
+    attachmentOptions: UpdateRecordAttachmentOptions
+  ): Promise<MachineRecord> {
+    const id = record.id.trim();
+    const normalizedFields = normalizeCreateRecordInput(
+      machineRecordToGraphCreateInput(record) as CreateRecordFieldsInput
+    );
+    const addFiles = attachmentOptions.addFiles ?? [];
+    const payloads = addFiles.length > 0 ? await filesToAttachmentPayloads(addFiles) : [];
+    const removeNames = (attachmentOptions.removeAttachmentFileNames ?? [])
+      .map((n) => n.trim())
+      .filter(Boolean);
+
+    const body: Record<string, unknown> = {
+      record: { ...record, ...normalizedFields, id },
+    };
+    if (payloads.length > 0) {
+      body.attachmentFiles = payloads;
+    }
+    if (removeNames.length > 0) {
+      body.removeAttachmentFileNames = removeNames;
+    }
+
+    const response = await requestJson<RecordResponse>(apiUrl(ISHIKAWA_RECORDS_PATH), {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    this.invalidateCaches();
+    return normalizeRecord(response.record);
+  }
+
+  async updateRecord(
+    record: MachineRecord,
+    attachmentOptions?: UpdateRecordAttachmentOptions
+  ): Promise<MachineRecord> {
     const id = record.id?.trim();
     if (!id) {
       throw new Error('El registro debe tener id para actualizar.');
     }
+    const hasAttachmentOps =
+      Boolean(attachmentOptions?.addFiles?.length) ||
+      Boolean(attachmentOptions?.removeAttachmentFileNames?.length);
+
+    if (hasAttachmentOps && attachmentOptions) {
+      return this.updateRecordViaApiWithAttachments(record, attachmentOptions);
+    }
+
     const normalizedFields = normalizeCreateRecordInput(
       machineRecordToGraphCreateInput(record) as CreateRecordFieldsInput
     );
@@ -766,7 +818,8 @@ const mockServiceAdapter: SharePointDataService = {
   getRecords: (filters?: Partial<MachineRecord>) => mockSharePointService.getRecords(filters),
   createRecord: (record: CreateRecordInput) =>
     mockSharePointService.createRecord(toMockCreateRecordPayload(record)),
-  updateRecord: (record: MachineRecord) => mockSharePointService.updateRecord(record),
+  updateRecord: (record, attachmentOptions) =>
+    mockSharePointService.updateRecord(record, attachmentOptions),
   getKPIs: () => mockSharePointService.getKPIs(),
   refreshDictionary: async () => {},
 };

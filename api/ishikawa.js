@@ -15,6 +15,7 @@ import {
   sanitizeAttachmentContentBase64,
   stripCustomAttachmentFieldsFromPayload,
   uploadListItemNativeAttachments,
+  deleteListItemNativeAttachment,
 } from './_sharepoint.js';
 
 const ALLOWED_RESOURCES = Object.freeze(['records', 'dictionary']);
@@ -123,6 +124,18 @@ async function writeCreatedRecordResponse(req, res, sharePointConfigResolved) {
   sendJson(res, 201, { record: createdRecord });
 }
 
+function normalizeRemoveAttachmentFileNames(raw) {
+  if (raw === undefined || raw === null) {
+    return [];
+  }
+  if (!Array.isArray(raw)) {
+    throw createHttpError(400, 'removeAttachmentFileNames must be an array when provided');
+  }
+  return raw
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : String(entry ?? '').trim()))
+    .filter((name) => name.length > 0);
+}
+
 async function writeUpdatedRecordResponse(req, res, sharePointConfigResolved) {
   enforceMethod(req.method, ['PATCH']);
   const requestBody = parseRequestBody(req.body);
@@ -134,8 +147,24 @@ async function writeUpdatedRecordResponse(req, res, sharePointConfigResolved) {
   if (rawId === undefined || rawId === null || String(rawId).trim() === '') {
     throw createHttpError(400, 'Request body.record must include id');
   }
+  const attachmentFiles = normalizeAttachmentFilesFromRequest(requestBody.attachmentFiles);
+  const removeAttachmentFileNames = normalizeRemoveAttachmentFileNames(
+    requestBody.removeAttachmentFileNames
+  );
+
   const payload = buildRecordPayload(incomingRecord, sharePointConfigResolved.fieldMap);
+  if (attachmentFiles.length > 0) {
+    stripCustomAttachmentFieldsFromPayload(payload, sharePointConfigResolved.fieldMap);
+  }
   await mergeListItem(sharePointConfigResolved, rawId, payload);
+
+  for (const fileName of removeAttachmentFileNames) {
+    await deleteListItemNativeAttachment(sharePointConfigResolved, rawId, fileName);
+  }
+  if (attachmentFiles.length > 0) {
+    await uploadListItemNativeAttachments(sharePointConfigResolved, rawId, attachmentFiles);
+  }
+
   const reloadedItem = await fetchListItemById(sharePointConfigResolved, rawId);
   const updatedRecord = mapListItemToMachineRecord(
     reloadedItem,

@@ -1,4 +1,13 @@
-import { Brand, Model, Section, ActivityType, Activity, MachineRecord, KPIData } from '../types';
+import {
+  Attachment,
+  Brand,
+  Model,
+  Section,
+  ActivityType,
+  Activity,
+  MachineRecord,
+  KPIData,
+} from '../types';
 import { getDistinctModeloIdsFromMatrix } from '../data/equipmentMatrix';
 
 const LOCALE_SORT = 'es';
@@ -152,8 +161,21 @@ class MockSharePointService {
       return [...mockRecords];
     }
 
-    const entries = Object.entries(filters).filter(
-      ([, value]) => value !== undefined && value !== null && String(value).length > 0
+    const isNonEmptyFilterValue = (value: unknown): boolean => {
+      if (value === undefined || value === null) {
+        return false;
+      }
+      if (typeof value === 'string') {
+        return value.trim().length > 0;
+      }
+      if (typeof value === 'number' || typeof value === 'boolean') {
+        return true;
+      }
+      return typeof value === 'object';
+    };
+
+    const entries = Object.entries(filters).filter(([, value]) =>
+      isNonEmptyFilterValue(value)
     ) as Array<[keyof MachineRecord, MachineRecord[keyof MachineRecord]]>;
 
     if (entries.length === 0) {
@@ -191,15 +213,56 @@ class MockSharePointService {
     return newRecord;
   }
 
-  async updateRecord(record: MachineRecord): Promise<MachineRecord> {
+  async updateRecord(
+    record: MachineRecord,
+    attachmentOptions?: { addFiles?: File[]; removeAttachmentFileNames?: string[] }
+  ): Promise<MachineRecord> {
     await this.delay(400);
     const idx = mockRecords.findIndex((r) => r.id === record.id);
     if (idx < 0) {
       throw new Error('No se encontró el registro a actualizar.');
     }
+
+    const hasRemove = Boolean(attachmentOptions?.removeAttachmentFileNames?.length);
+    const hasAdd = Boolean(attachmentOptions?.addFiles?.length);
+
+    if (!hasRemove && !hasAdd) {
+      const updated: MachineRecord = {
+        ...record,
+        updatedAt: new Date().toISOString(),
+      };
+      mockRecords[idx] = updated;
+      return updated;
+    }
+
+    let attachments: Attachment[] = [];
+    if (record.attachments && record.attachments.length > 0) {
+      attachments = [...record.attachments];
+    } else if (record.attachment) {
+      attachments = [record.attachment];
+    }
+
+    const removeSet = new Set(
+      (attachmentOptions?.removeAttachmentFileNames ?? []).map((n) => n.trim()).filter(Boolean)
+    );
+    attachments = attachments.filter((a) => !removeSet.has((a.name ?? '').trim()));
+
+    const fromFiles =
+      attachmentOptions?.addFiles?.map((f, i) => ({
+        id: `mock-att-${Date.now()}-${i}`,
+        name: f.name,
+        url: `https://example.invalid/mock/${encodeURIComponent(f.name)}`,
+        type: f.type || 'application/octet-stream',
+        size: f.size,
+      })) ?? [];
+    attachments = [...attachments, ...fromFiles];
+
     const updated: MachineRecord = {
       ...record,
       updatedAt: new Date().toISOString(),
+      ...(attachments.length > 0
+        ? { attachment: attachments[0], attachments }
+        : { attachment: undefined, attachments: undefined }),
     };
     mockRecords[idx] = updated;
     return updated;
