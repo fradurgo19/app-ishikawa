@@ -101,6 +101,13 @@ export const DataTablePage: React.FC = () => {
     setFilteredRecords(applyRecordFilters(records, filters));
   }, [records, filters]);
 
+  const filteredTimeTotalMinutes = useMemo(() => {
+    return filteredRecords.reduce((sum, record) => {
+      const minutes = Number(record.time);
+      return sum + (Number.isFinite(minutes) ? minutes : 0);
+    }, 0);
+  }, [filteredRecords]);
+
   const getBrandName = (brandId: string) => {
     return brands.find((b) => b.id === brandId)?.name || brandId || 'Desconocido';
   };
@@ -340,6 +347,25 @@ export const DataTablePage: React.FC = () => {
                   </tr>
                 ))}
               </tbody>
+              {filteredRecords.length > 0 ? (
+                <tfoot>
+                  <tr className="border-t-2 border-gray-200 bg-gray-50">
+                    <td className="px-6 py-3" />
+                    <td className="px-6 py-3" />
+                    <td className="px-6 py-3" />
+                    <td className="px-6 py-3" />
+                    <td className="px-6 py-3" />
+                    <td className="px-6 py-3 whitespace-nowrap">
+                      <span className="sr-only">Suma de minutos (filas visibles): </span>
+                      <span className="inline-flex rounded-full bg-blue-200 px-2 py-1 text-xs font-semibold text-blue-900">
+                        {filteredTimeTotalMinutes}m
+                      </span>
+                    </td>
+                    <td className="px-6 py-3" />
+                    <td className="px-6 py-3" />
+                  </tr>
+                </tfoot>
+              ) : null}
             </table>
           </div>
 
