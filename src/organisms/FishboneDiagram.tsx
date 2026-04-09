@@ -220,7 +220,7 @@ function FishboneRibColumn({
   onToggle,
   getNodeColor,
   getNodeIcon,
-}: FishboneRibColumnProps) {
+}: Readonly<FishboneRibColumnProps>) {
   const branch = (
     <div className="max-w-[220px]">
       <FishboneBranch
@@ -251,7 +251,13 @@ function FishboneRibColumn({
   );
 }
 
-function FishboneBranch({ node, inheritedRib, onToggle, getNodeColor, getNodeIcon }: FishboneBranchProps) {
+function FishboneBranch({
+  node,
+  inheritedRib,
+  onToggle,
+  getNodeColor,
+  getNodeIcon,
+}: Readonly<FishboneBranchProps>) {
   const hasChildren = node.children.length > 0;
   const { upper, lower } = splitChildrenIntoUpperAndLowerRibs(node.children, inheritedRib);
   const Icon = getNodeIcon(node.type);
@@ -315,7 +321,7 @@ function FishboneNodeButton({
   Icon,
   className,
   onToggle,
-}: FishboneNodeButtonProps) {
+}: Readonly<FishboneNodeButtonProps>) {
   return (
     <button
       type="button"
@@ -497,6 +503,47 @@ function buildModelNode(
   };
 }
 
+/**
+ * Clave estable para agrupar el mismo texto de problema (varios registros → un solo nodo amarillo).
+ */
+function problemGroupingKey(problem: string): string {
+  return normalizeLabel(problem).toLowerCase();
+}
+
+/**
+ * Hash corto para id de nodo estable sin depender de la longitud del texto del problema.
+ */
+function shortStringHash(input: string): string {
+  let h = 5381;
+  for (const ch of input) {
+    const cp = ch.codePointAt(0);
+    if (cp === undefined) {
+      continue;
+    }
+    h = Math.trunc(Math.imul(h, 33) + cp);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * Agrupa registros de la misma sección con el mismo problema (texto normalizado), conservando el orden de aparición.
+ */
+function groupSectionRecordsByProblemText(records: MachineRecord[]): MachineRecord[][] {
+  const orderKeys: string[] = [];
+  const groups = new Map<string, MachineRecord[]>();
+  for (const record of records) {
+    const key = problemGroupingKey(record.problem);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(record);
+    } else {
+      groups.set(key, [record]);
+      orderKeys.push(key);
+    }
+  }
+  return orderKeys.map((key) => groups.get(key)!);
+}
+
 function buildSectionNode(
   brand: Brand,
   model: Model,
@@ -509,14 +556,15 @@ function buildSectionNode(
   const sectionRecords = records.filter((record) =>
     shouldIncludeRecord(record, brand.id, model.id, section.id, filters)
   );
+  const problemGroups = groupSectionRecordsByProblemText(sectionRecords);
 
   return {
     id: `${brand.id}-${model.id}-${section.id}`,
     type: 'seccion',
     label: section.name,
     expanded: false,
-    children: sectionRecords.map((record) =>
-      buildProblemNode(record, activityTypes, activities)
+    children: problemGroups.map((group) =>
+      buildProblemNodeFromRecordGroup(brand.id, model.id, section.id, group, activityTypes, activities)
     ),
   };
 }
@@ -545,18 +593,25 @@ function shouldIncludeRecord(
   return record.problem.toLowerCase().includes(filters.selectedProblem.toLowerCase());
 }
 
-function buildProblemNode(
-  record: MachineRecord,
+function buildProblemNodeFromRecordGroup(
+  brandId: string,
+  modelId: string,
+  sectionId: string,
+  group: MachineRecord[],
   activityTypes: ActivityType[],
   activities: Activity[]
 ): FishboneNode {
+  const representative = group[0];
+  const key = problemGroupingKey(representative.problem);
+  const idSuffix = shortStringHash(`${brandId}|${modelId}|${sectionId}|${key}`);
+
   return {
-    id: `problem-${record.id}`,
+    id: `problem-${brandId}-${modelId}-${sectionId}-${idSuffix}`,
     type: 'problema',
-    label: record.problem,
+    label: representative.problem,
     expanded: false,
-    data: record,
-    children: [buildActivityTypeNode(record, activityTypes, activities)],
+    data: representative,
+    children: group.map((record) => buildActivityTypeNode(record, activityTypes, activities)),
   };
 }
 
