@@ -1,8 +1,9 @@
 import React from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Download, FileText, Paperclip } from 'lucide-react';
+import { ArrowLeft, ExternalLink, FileText, Paperclip } from 'lucide-react';
 import { Button } from '../atoms/Button';
 import type { Attachment, FishboneDiagramDetailPayload } from '../types';
+import { looksLikeNavigableUrl, openUrlInNewBrowserTab } from '../utils/openExternalInNewTab';
 
 function isFromDataTableState(state: unknown): boolean {
   return (
@@ -28,11 +29,6 @@ function isDiagramDetailPayload(value: unknown): value is FishboneDiagramDetailP
     return typeof (value as { focusAttachmentId?: string }).focusAttachmentId === 'string';
   }
   return false;
-}
-
-function looksLikeNavigableUrl(text: string): boolean {
-  const t = text.trim();
-  return /^https?:\/\//i.test(t) || /^mailto:/i.test(t);
 }
 
 interface FishboneDiagramLocationState {
@@ -100,14 +96,15 @@ function ResourceDetailView({
     resourceBlock = <p className="text-gray-500">No hay texto de recurso en este registro.</p>;
   } else if (href) {
     resourceBlock = (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="break-words text-base text-blue-600 underline hover:text-blue-800"
+      <button
+        type="button"
+        onClick={() => {
+          openUrlInNewBrowserTab(href);
+        }}
+        className="break-words text-left text-base text-blue-600 underline hover:text-blue-800"
       >
         {text}
-      </a>
+      </button>
     );
   } else {
     resourceBlock = (
@@ -187,17 +184,18 @@ function AttachmentsListSection({
 
           return (
             <li key={key} className={itemClass}>
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex max-w-full items-center gap-2 text-sm text-blue-600 hover:underline"
+              <button
+                type="button"
+                onClick={() => {
+                  openUrlInNewBrowserTab(href);
+                }}
+                className="inline-flex max-w-full items-center gap-2 text-left text-sm text-blue-600 hover:underline"
               >
-                <Download className="h-4 w-4 shrink-0" aria-hidden />
+                <ExternalLink className="h-4 w-4 shrink-0" aria-hidden />
                 <span className="break-words" title={label}>
                   {label}
                 </span>
-              </a>
+              </button>
             </li>
           );
         })}

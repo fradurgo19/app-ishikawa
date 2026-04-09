@@ -16,6 +16,7 @@ import {
 import { sharePointService } from '../services/sharePointService';
 import { normalizeLabel } from '../data/equipmentMatrix';
 import { resolveActivityDisplayLabel } from '../utils/resolveActivityDisplayLabel';
+import { looksLikeNavigableUrl, openUrlInNewBrowserTab } from '../utils/openExternalInNewTab';
 import { ChevronRight, ChevronDown, Clock, Paperclip, PenTool as Tool } from 'lucide-react';
 
 interface FishboneDiagramProps {
@@ -53,6 +54,25 @@ function fishboneNodeOpensDetailView(node: FishboneNode): boolean {
   return node.type === 'adjunto' && isFishboneAttachmentLeafDetail(node.data);
 }
 
+/** Intenta abrir recurso/adjunto en nueva pestaña; si hay URL y el navegador no bloquea, no hace falta la pantalla de detalle. */
+function tryOpenDiagramLeafInNewTab(node: FishboneNode): boolean {
+  if (node.type === 'recurso' && isFishboneResourceLeafDetail(node.data)) {
+    const text = node.data.resourceText.trim();
+    if (looksLikeNavigableUrl(text)) {
+      return openUrlInNewBrowserTab(text);
+    }
+    return false;
+  }
+  if (node.type === 'adjunto' && isFishboneAttachmentLeafDetail(node.data)) {
+    const url = node.data.attachment.url?.trim();
+    if (url) {
+      return openUrlInNewBrowserTab(url);
+    }
+    return false;
+  }
+  return false;
+}
+
 export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
   selectedTipoEquipo,
   selectedBrand,
@@ -66,6 +86,10 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
 
   const openLeafDetail = useCallback(
     (node: FishboneNode) => {
+      if (tryOpenDiagramLeafInNewTab(node)) {
+        return;
+      }
+
       const returnTo = `${location.pathname}${location.search}`;
       const baseState =
         location.state !== null && typeof location.state === 'object'

@@ -70,8 +70,8 @@ export const FishbonePage: React.FC = () => {
                 <li>• Diferentes colores representan diferentes tipos de datos</li>
                 <li>• Los iconos ayudan a identificar tipos de contenido específicos</li>
                 <li>
-                  • Las tarjetas Recurso y Adjunto permiten abrir una pantalla de detalle (enlace o lista de
-                  archivos del registro)
+                  • Recurso y Adjunto: si hay enlace, se abre en una nueva pestaña para verlo; si no, se muestra la
+                  pantalla de detalle del registro
                 </li>
               </ul>
             </div>
