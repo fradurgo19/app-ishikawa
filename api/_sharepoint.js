@@ -297,7 +297,38 @@ export async function createListItem(config, payload) {
   });
 }
 
-/** Actualiza campos del ítem (MERGE); mismo payload que createListItem. */
+/**
+ * InternalName OData del tipo de fila de la lista (p. ej. SP.Data.IshikawaListItem).
+ * Sin esto, algunos inquilinos devuelven 401 en MERGE aunque el POST de alta funcione.
+ */
+async function tryGetListItemEntityTypeFullName(config, accessToken) {
+  const encodedListTitle = escapeODataString(config.listTitle);
+  const url = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')?$select=ListItemEntityTypeFullName`;
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json;odata=nometadata',
+      },
+    });
+    const responseText = await response.text();
+    if (!response.ok || !responseText) {
+      return '';
+    }
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch {
+      return '';
+    }
+    return getTextValue(data.ListItemEntityTypeFullName ?? data.d?.ListItemEntityTypeFullName);
+  } catch {
+    return '';
+  }
+}
+
+/** Actualiza campos del ítem (MERGE); alineado con documentación MS (digest + __metadata cuando aplica). */
 export async function mergeListItem(config, itemId, payload) {
   const accessToken = await getAccessToken(config);
   const encodedListTitle = escapeODataString(config.listTitle);
@@ -306,21 +337,48 @@ export async function mergeListItem(config, itemId, payload) {
     throw createHttpError(400, 'Invalid list item id');
   }
   const url = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items(${id})`;
+
+  const entityType = await tryGetListItemEntityTypeFullName(config, accessToken);
+
+  let digest;
+  try {
+    digest = await getSharePointFormDigest(config, accessToken);
+  } catch {
+    digest = undefined;
+  }
+
+  const useVerboseMetadata = Boolean(entityType);
+  const bodyObject = useVerboseMetadata
+    ? { __metadata: { type: entityType }, ...payload }
+    : payload;
+
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: useVerboseMetadata ? 'application/json;odata=verbose' : 'application/json;odata=nometadata',
+    'Content-Type': useVerboseMetadata ? 'application/json' : 'application/json;odata=nometadata',
+    'IF-MATCH': '*',
+    'X-HTTP-Method': 'MERGE',
+  };
+  if (digest) {
+    headers['X-RequestDigest'] = digest;
+  }
+
   const response = await fetch(url, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/json;odata=nometadata',
-      'Content-Type': 'application/json;odata=nometadata',
-      'X-HTTP-Method': 'MERGE',
-      'IF-MATCH': '*',
-    },
-    body: JSON.stringify(payload),
+    headers,
+    body: JSON.stringify(bodyObject),
   });
   const responsePayload = await parseJsonResponse(response);
   if (!response.ok) {
-    throw createHttpError(502, 'SharePoint merge request failed', {
-      status: response.status,
+    const upstreamStatus = response.status;
+    const statusCode =
+      upstreamStatus === 401 || upstreamStatus === 403 ? upstreamStatus : 502;
+    const message =
+      upstreamStatus === 401 || upstreamStatus === 403
+        ? 'SharePoint denied updating the list item. Check SharePoint application permissions for this site (Sites.ReadWrite.All or Sites.Selected with admin grant) and client secret validity.'
+        : 'SharePoint merge request failed';
+    throw createHttpError(statusCode, message, {
+      status: upstreamStatus,
       statusText: response.statusText,
       response: responsePayload,
       request: { method: 'MERGE', url },
@@ -542,7 +600,7 @@ export function mapListItemToMachineRecord(item, fieldMap, siteOrigin = '') {
  * @param {boolean} [options.isMerge] — Actualización de ítem (MERGE). Omite columnas que SharePoint suele rechazar al actualizar (p. ej. autor / creado por).
  */
 export function buildRecordPayload(record, fieldMap, options) {
-  const isMerge = Boolean(options && options.isMerge);
+  const isMerge = Boolean(options?.isMerge);
   const payload = {
     [fieldMap.brand]: normalizeRequiredText(record.brandId, 'brandId'),
     [fieldMap.model]: normalizeRequiredText(record.modelId, 'modelId'),
