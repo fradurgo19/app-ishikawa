@@ -19,7 +19,10 @@ import {
   updateSharePointListItemViaMicrosoftGraph,
 } from './microsoftGraphListService';
 import type { GraphCreateRecordInput } from './microsoftGraphListService';
-import { uploadListItemAttachmentRest } from './sharePointRestAttachments';
+import {
+  deleteListItemAttachmentRest,
+  uploadListItemAttachmentRest,
+} from './sharePointRestAttachments';
 import { filesToAttachmentPayloads } from '../utils/attachmentFilePayload';
 import { getDistinctModeloIdsFromMatrix } from '../data/equipmentMatrix';
 import { sharePointService as mockSharePointService } from './mockSharePointService';
@@ -725,6 +728,112 @@ class LiveSharePointService implements SharePointDataService {
     return this.createRecordThenUploadAttachmentsViaRest(normalized, files!, ctx!, sharePointRestToken!);
   }
 
+  /**
+   * Igual que crear con archivos: Graph (delegado) para columnas + SharePoint REST para adjuntos nativos.
+   * Evita PATCH /api cuando el token de aplicación recibe 401 en MERGE pero el usuario sí tiene sesión Microsoft.
+   */
+  private async tryUpdateRecordWithDelegatedGraphAndRest(
+    record: MachineRecord,
+    attachmentOptions: UpdateRecordAttachmentOptions
+  ): Promise<MachineRecord | null> {
+    const ctx = await resolveGraphListContext();
+    if (!ctx) {
+      if (isDelegatedOnlySharePointMode()) {
+        throw new Error(
+          'No hay configuración de lista SharePoint (Graph) para actualizar el registro con permisos delegados.'
+        );
+      }
+      return null;
+    }
+
+    await authService.initializeAuth();
+    await authService.getAccountWithRetry();
+
+    let graphToken: string | null = null;
+    let sharePointRestToken: string | null = null;
+    try {
+      graphToken = await authService.acquireGraphAccessToken();
+      sharePointRestToken = await authService.acquireSharePointAccessToken(ctx.siteUrl);
+    } catch {
+      graphToken = null;
+      sharePointRestToken = null;
+    }
+
+    if (!graphToken || !sharePointRestToken) {
+      if (isDelegatedOnlySharePointMode()) {
+        throw new Error(MSG_DELEGATED_SIGNIN_REQUIRED);
+      }
+      return null;
+    }
+
+    const id = normalizeListItemId(record.id);
+    const addFiles = attachmentOptions.addFiles ?? [];
+    const removeNames = (attachmentOptions.removeAttachmentFileNames ?? [])
+      .map((n) => n.trim())
+      .filter(Boolean);
+    const skipCustomAttachmentInGraphPatch = addFiles.length > 0 || removeNames.length > 0;
+
+    const baseGraphInput = machineRecordToGraphCreateInput(record);
+    const graphRecordInput: GraphCreateRecordInput = skipCustomAttachmentInGraphPatch
+      ? { ...baseGraphInput, attachment: undefined, attachments: undefined }
+      : baseGraphInput;
+
+    const normalizedFields = normalizeCreateRecordInput(
+      graphRecordInput as CreateRecordFieldsInput
+    );
+
+    try {
+      await updateSharePointListItemViaMicrosoftGraph({
+        siteUrl: ctx.siteUrl,
+        listName: ctx.listName,
+        fieldMap: getClientFieldMap(),
+        accessToken: graphToken,
+        itemId: id,
+        record: normalizedFields,
+      });
+
+      for (const fileName of removeNames) {
+        await deleteListItemAttachmentRest({
+          siteUrl: ctx.siteUrl,
+          listTitle: ctx.listName,
+          itemId: id,
+          fileName,
+          accessToken: sharePointRestToken,
+        });
+      }
+
+      for (const file of addFiles) {
+        await uploadListItemAttachmentRest({
+          siteUrl: ctx.siteUrl,
+          listTitle: ctx.listName,
+          itemId: id,
+          file,
+          accessToken: sharePointRestToken,
+        });
+      }
+
+      if (addFiles.length > 0) {
+        await delayMs(POST_CREATE_ATTACHMENT_DELAY_MS);
+      }
+
+      const refreshed = await loadGraphListItemAsMachineRecord({
+        siteUrl: ctx.siteUrl,
+        listName: ctx.listName,
+        fieldMap: getClientFieldMap(),
+        accessToken: graphToken,
+        itemId: id,
+        sharePointAccessToken: sharePointRestToken,
+      });
+      this.invalidateCaches();
+      return normalizeRecord(refreshed);
+    } catch (err) {
+      if (isDelegatedOnlySharePointMode()) {
+        throw new Error(delegatedGraphUpdateErrorMessage(err));
+      }
+      return null;
+    }
+  }
+
   private async updateRecordViaApiWithAttachments(
     record: MachineRecord,
     attachmentOptions: UpdateRecordAttachmentOptions
@@ -766,6 +875,15 @@ class LiveSharePointService implements SharePointDataService {
       Boolean(attachmentOptions?.removeAttachmentFileNames?.length);
 
     if (hasAttachmentOps && attachmentOptions) {
+      const delegated = await this.tryUpdateRecordWithDelegatedGraphAndRest(record, attachmentOptions);
+      if (delegated !== null) {
+        return delegated;
+      }
+      if (isDelegatedOnlySharePointMode()) {
+        throw new Error(
+          'No se pudo actualizar con tu sesión Microsoft. Si necesitas guardar sin iniciar sesión, el administrador debe corregir permisos de aplicación en SharePoint y Graph para el API del servidor.'
+        );
+      }
       return this.updateRecordViaApiWithAttachments(record, attachmentOptions);
     }
 

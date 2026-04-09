@@ -6,7 +6,7 @@ import type { Attachment } from '../types';
  */
 
 function escapeODataStringLiteral(value: string): string {
-  return value.replace(/'/g, "''");
+  return value.replaceAll("'", "''");
 }
 
 async function parseJsonSafe(response: Response): Promise<Record<string, unknown>> {
@@ -107,6 +107,64 @@ export async function uploadListItemAttachmentRest(options: {
     const errBody = await parseJsonSafe(response);
     throw new Error(
       `No se pudo subir "${file.name}": HTTP ${response.status} ${JSON.stringify(errBody).slice(0, 280)}`
+    );
+  }
+}
+
+/**
+ * Elimina un archivo de la columna nativa Attachments (DELETE SharePoint REST).
+ * 404 se ignora (el adjunto ya no existe).
+ */
+export async function deleteListItemAttachmentRest(options: {
+  siteUrl: string;
+  listTitle: string;
+  itemId: string;
+  fileName: string;
+  accessToken: string;
+}): Promise<void> {
+  const { siteUrl, listTitle, itemId, fileName, accessToken } = options;
+  const base = siteUrl.replace(/\/$/, '');
+  const id = Number.parseInt(itemId, 10);
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error('Id de ítem de lista no válido para eliminar adjunto');
+  }
+  const name = (fileName || '').trim();
+  if (!name) {
+    return;
+  }
+  const safeTitle = escapeODataStringLiteral(listTitle.trim());
+  const safeName = escapeODataStringLiteral(name);
+  const deleteUrl = `${base}/_api/web/lists/GetByTitle('${safeTitle}')/items(${id})/AttachmentFiles('${safeName}')`;
+
+  let digest: string | undefined;
+  try {
+    digest = await getSharePointFormDigest(base, accessToken);
+  } catch {
+    digest = undefined;
+  }
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/json;odata=nometadata',
+    'IF-MATCH': '*',
+  };
+  if (digest) {
+    headers['X-RequestDigest'] = digest;
+  }
+
+  const response = await fetch(deleteUrl, {
+    method: 'DELETE',
+    headers,
+  });
+
+  if (response.status === 404) {
+    return;
+  }
+
+  if (!response.ok) {
+    const errBody = await parseJsonSafe(response);
+    throw new Error(
+      `No se pudo eliminar el adjunto "${name}": HTTP ${response.status} ${JSON.stringify(errBody).slice(0, 280)}`
     );
   }
 }
