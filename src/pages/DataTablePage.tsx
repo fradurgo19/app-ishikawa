@@ -11,7 +11,8 @@ import {
   getModelosForTipoYMarca,
 } from '../data/equipmentMatrix';
 import { resolveActivityDisplayLabel } from '../utils/resolveActivityDisplayLabel';
-import { ArrowLeft, Download, Filter, GitBranch, Pencil } from 'lucide-react';
+import { buildDuplicateCreatePayload } from '../utils/buildDuplicateCreatePayload';
+import { ArrowLeft, Copy, Download, Filter, GitBranch, Pencil } from 'lucide-react';
 import { EditRecordModal } from '../molecules/EditRecordModal';
 
 interface DataTableFilters {
@@ -46,6 +47,7 @@ export const DataTablePage: React.FC = () => {
 
   const [filters, setFilters] = useState<DataTableFilters>(INITIAL_FILTERS);
   const [editingRecord, setEditingRecord] = useState<MachineRecord | null>(null);
+  const [duplicatingRecordId, setDuplicatingRecordId] = useState<string | null>(null);
 
   const tiposFilterOptions = useMemo(
     () => getDistinctTiposEquipo().map((t) => ({ value: t, label: t })),
@@ -150,6 +152,23 @@ export const DataTablePage: React.FC = () => {
   const clearFilters = () => {
     setFilters({ ...INITIAL_FILTERS });
   };
+
+  const handleDuplicateRecord = useCallback(
+    async (record: MachineRecord) => {
+      setDuplicatingRecordId(record.id);
+      try {
+        await sharePointService.createRecord(buildDuplicateCreatePayload(record));
+        await loadData();
+        alert('Registro duplicado. Se creó una copia con los mismos datos.');
+      } catch (error) {
+        console.error('Error al duplicar registro:', error);
+        alert(error instanceof Error ? error.message : 'No se pudo duplicar el registro.');
+      } finally {
+        setDuplicatingRecordId(null);
+      }
+    },
+    [loadData]
+  );
 
   if (loading) {
     return (
@@ -342,7 +361,12 @@ export const DataTablePage: React.FC = () => {
                       <RecordAttachmentsCell attachments={resolveRecordAttachments(record)} />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <RecordActionsCell record={record} onEdit={setEditingRecord} />
+                      <RecordActionsCell
+                        record={record}
+                        onEdit={setEditingRecord}
+                        onDuplicate={handleDuplicateRecord}
+                        duplicateInProgress={duplicatingRecordId === record.id}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -450,9 +474,16 @@ const RecordAttachmentsCell: React.FC<RecordAttachmentsCellProps> = ({ attachmen
 interface RecordActionsCellProps {
   record: MachineRecord;
   onEdit: (record: MachineRecord) => void;
+  onDuplicate: (record: MachineRecord) => void;
+  duplicateInProgress: boolean;
 }
 
-const RecordActionsCell: React.FC<RecordActionsCellProps> = ({ record, onEdit }) => {
+const RecordActionsCell: React.FC<RecordActionsCellProps> = ({
+  record,
+  onEdit,
+  onDuplicate,
+  duplicateInProgress,
+}) => {
   const params = new URLSearchParams();
   if (record.tipoEquipoId.trim()) {
     params.set('tipoEquipo', record.tipoEquipoId);
@@ -482,6 +513,16 @@ const RecordActionsCell: React.FC<RecordActionsCellProps> = ({ record, onEdit })
       >
         <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
         Editar
+      </button>
+      <button
+        type="button"
+        disabled={duplicateInProgress}
+        aria-busy={duplicateInProgress}
+        className="inline-flex items-center gap-1 text-left text-sm font-medium text-gray-800 hover:text-gray-950 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+        onClick={() => onDuplicate(record)}
+      >
+        <Copy className="h-3.5 w-3.5 shrink-0" aria-hidden />
+        {duplicateInProgress ? 'Duplicando…' : 'Duplicar'}
       </button>
       <Link
         to={to}
