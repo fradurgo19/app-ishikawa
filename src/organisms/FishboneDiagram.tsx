@@ -210,7 +210,7 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
       </p>
       <div className="min-h-0 max-h-[min(calc(100dvh-15rem),1100px)] overflow-x-auto overflow-y-auto overscroll-y-contain pb-10 pt-2 [-webkit-overflow-scrolling:touch]">
         {fishboneData.length > 0 ? (
-          <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center gap-5 px-2 pb-4">
+          <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center gap-4 px-2 pb-4">
             <div
               className="flex shrink-0 flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
               title="Efecto / foco del análisis"
@@ -327,8 +327,8 @@ function FishboneRibColumn({
     </div>
   );
   const connector = <FishboneRibHorizontalConnector />;
-  const ribRowPad = childDepth >= 2 ? 'py-3' : 'py-1';
-  const ribGap = childDepth >= 2 ? 'gap-3 sm:gap-4' : 'gap-2 sm:gap-2.5';
+  const ribRowPad = childDepth >= 2 ? 'py-4' : 'py-1.5';
+  const ribGap = childDepth >= 2 ? 'gap-4 sm:gap-4' : 'gap-2 sm:gap-2.5';
 
   if (placement === 'upper') {
     return (
@@ -367,13 +367,13 @@ function FishboneBranch({
   const nextDepth = depth + 1;
 
   const branchLayout = compactDepth
-    ? 'gap-3 md:gap-x-4 md:gap-y-2 lg:gap-x-5'
-    : 'gap-8 md:gap-x-8 md:gap-y-5 lg:gap-x-10';
-  const ribStackGap = compactDepth ? 'gap-2.5' : 'gap-8';
+    ? 'gap-2 md:gap-x-3 md:gap-y-2 lg:gap-x-4'
+    : 'gap-6 md:gap-x-7 md:gap-y-4 lg:gap-x-9';
+  const ribStackGap = compactDepth ? 'gap-3' : 'gap-6 md:gap-10';
 
   if (node.type === 'actividad' && node.expanded && node.children.length > 0) {
     return (
-      <div className="flex w-full min-w-0 flex-col items-center gap-4">
+      <div className="flex w-full min-w-0 flex-col items-center gap-5">
         <div className="flex w-full justify-center px-1">
           <FishboneNodeButton
             node={node}
@@ -384,7 +384,7 @@ function FishboneBranch({
             onToggle={() => hasChildren && onToggle(node.id)}
           />
         </div>
-        <div className="flex w-full min-w-0 max-w-2xl flex-col items-center gap-3 border-t border-gray-200 pt-4">
+        <div className="flex w-full min-w-0 max-w-2xl flex-col items-center gap-5 border-t border-gray-200 pt-5">
           {node.children.map((child) => (
             <div key={child.id} className="flex w-full justify-center px-1">
               <FishboneBranch
