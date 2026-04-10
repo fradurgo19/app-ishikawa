@@ -202,15 +202,15 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
   }
 
   return (
-    <div className="bg-white rounded-lg p-6 shadow-md">
+    <div className="min-h-0 bg-white rounded-lg p-6 shadow-md">
       <h2 className="text-2xl font-bold text-gray-900 mb-4">Diagrama Ishikawa</h2>
       <p className="text-sm text-gray-600 mb-4">
         Vista vertical: el efecto va arriba y la espina desciende por marcas y modelos. Las causas se alternan a
         izquierda y derecha en cada nivel (igual que antes arriba/abajo, ahora en los laterales).
       </p>
-      <div className="max-h-[min(85vh,1200px)] overflow-x-auto overflow-y-auto pb-4 pt-2">
+      <div className="min-h-0 max-h-[min(calc(100dvh-15rem),1100px)] overflow-x-auto overflow-y-auto overscroll-y-contain pb-10 pt-2 [-webkit-overflow-scrolling:touch]">
         {fishboneData.length > 0 ? (
-          <div className="mx-auto flex min-w-min max-w-5xl flex-col items-center gap-5 px-2">
+          <div className="mx-auto flex min-w-min max-w-5xl flex-col items-center gap-5 px-2 pb-4">
             <div
               className="flex shrink-0 flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
               title="Efecto / foco del análisis"
