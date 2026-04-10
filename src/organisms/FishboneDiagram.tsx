@@ -210,8 +210,8 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
       </p>
       <div className="max-h-[min(85vh,1200px)] overflow-x-auto overflow-y-auto pb-4 pt-2">
         {fishboneData.length > 0 ? (
-          <div className="mx-auto flex w-full min-w-min max-w-5xl flex-col divide-y divide-gray-300 px-2">
-            <div className="flex shrink-0 flex-col items-center pb-5">
+          <div className="mx-auto flex w-full min-w-min max-w-5xl flex-col px-2">
+            <div className="flex shrink-0 flex-col items-center pb-6">
               <div
                 className="flex w-full max-w-[min(100%,320px)] flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
                 title="Efecto / foco del análisis"
@@ -223,7 +223,10 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
               </div>
             </div>
             {fishboneData.map((node) => (
-              <div key={node.id} className="flex w-full shrink-0 flex-col items-center py-6">
+              <div
+                key={node.id}
+                className="flex w-full shrink-0 flex-col items-center border-t border-gray-200 pt-6"
+              >
                 <FishboneBranch
                   node={node}
                   depth={0}
@@ -369,6 +372,73 @@ function FishboneBranch({
     : 'gap-8 md:gap-x-8 md:gap-y-5 lg:gap-x-10';
   const ribStackGap = compactDepth ? 'gap-2.5' : 'gap-8';
 
+  const nodeButton = (
+    <FishboneNodeButton
+      node={node}
+      hasChildren={hasChildren}
+      Icon={Icon}
+      className={getNodeColor(node.type)}
+      onOpenLeafDetail={onOpenLeafDetail}
+      onToggle={() => hasChildren && onToggle(node.id)}
+    />
+  );
+
+  /** Desde sección en adelante: padre arriba, línea y ramas abajo (evita invertir padre/hijo en escritorio). */
+  if (!compactDepth) {
+    const showRibs = node.expanded && (upper.length > 0 || lower.length > 0);
+    const twoColumns = upper.length > 0 && lower.length > 0;
+
+    return (
+      <div className="flex w-full min-w-0 flex-col items-stretch gap-4">
+        <div className="flex w-full justify-center px-1">{nodeButton}</div>
+        {showRibs && (
+          <div className="min-w-0 border-t border-gray-200 pt-5">
+            <div
+              className={`flex w-full min-w-0 flex-col gap-6 ${twoColumns ? 'md:flex-row md:items-start md:justify-between md:gap-6 lg:gap-8' : ''}`}
+            >
+              {upper.length > 0 && (
+                <div
+                  className={`flex min-w-0 flex-col ${ribStackGap} ${twoColumns ? 'md:w-[48%] md:max-w-[48%] md:items-end' : 'w-full items-stretch'}`}
+                >
+                  {upper.map((child) => (
+                    <FishboneRibColumn
+                      key={child.id}
+                      child={child}
+                      childDepth={nextDepth}
+                      placement="upper"
+                      onOpenLeafDetail={onOpenLeafDetail}
+                      onToggle={onToggle}
+                      getNodeColor={getNodeColor}
+                      getNodeIcon={getNodeIcon}
+                    />
+                  ))}
+                </div>
+              )}
+              {lower.length > 0 && (
+                <div
+                  className={`flex min-w-0 flex-col ${ribStackGap} ${twoColumns ? 'md:w-[48%] md:max-w-[48%] md:items-start' : 'w-full items-stretch'}`}
+                >
+                  {lower.map((child) => (
+                    <FishboneRibColumn
+                      key={child.id}
+                      child={child}
+                      childDepth={nextDepth}
+                      placement="lower"
+                      onOpenLeafDetail={onOpenLeafDetail}
+                      onToggle={onToggle}
+                      getNodeColor={getNodeColor}
+                      getNodeIcon={getNodeIcon}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`flex w-full min-w-0 flex-col items-stretch md:flex-row md:items-start md:justify-center ${branchLayout}`}
@@ -393,14 +463,7 @@ function FishboneBranch({
       )}
 
       <div className="order-1 flex shrink-0 flex-row items-start justify-center md:order-2 md:pt-0.5">
-        <FishboneNodeButton
-          node={node}
-          hasChildren={hasChildren}
-          Icon={Icon}
-          className={getNodeColor(node.type)}
-          onOpenLeafDetail={onOpenLeafDetail}
-          onToggle={() => hasChildren && onToggle(node.id)}
-        />
+        {nodeButton}
       </div>
 
       {node.expanded && lower.length > 0 && (
