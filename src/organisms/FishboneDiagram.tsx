@@ -210,31 +210,29 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
       </p>
       <div className="max-h-[min(85vh,1200px)] overflow-x-auto overflow-y-auto pb-4 pt-2">
         {fishboneData.length > 0 ? (
-          <div className="flex min-w-min flex-col items-center gap-3 px-2">
-            <div
-              className="flex shrink-0 flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
-              title="Efecto / foco del análisis"
-            >
-              <span className="hidden sm:inline">Efecto</span>
-              <span className="max-w-[min(90vw,320px)] whitespace-pre-wrap break-words sm:max-w-[280px]">
-                {selectedProblem || 'Análisis'}
-              </span>
+          <div className="mx-auto flex w-full min-w-min max-w-5xl flex-col divide-y divide-gray-300 px-2">
+            <div className="flex shrink-0 flex-col items-center pb-5">
+              <div
+                className="flex w-full max-w-[min(100%,320px)] flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
+                title="Efecto / foco del análisis"
+              >
+                <span className="hidden sm:inline">Efecto</span>
+                <span className="max-w-[min(90vw,320px)] whitespace-pre-wrap break-words sm:max-w-[280px]">
+                  {selectedProblem || 'Análisis'}
+                </span>
+              </div>
             </div>
-            <div className="h-4 w-px shrink-0 bg-gray-400" aria-hidden />
-            {fishboneData.map((node, index) => (
-              <React.Fragment key={node.id}>
-                {index > 0 && <div className="h-5 w-px shrink-0 bg-gray-400" aria-hidden />}
-                <div className="flex w-full max-w-5xl shrink-0 flex-col items-center py-0.5">
-                  <FishboneBranch
-                    node={node}
-                    depth={0}
-                    onOpenLeafDetail={openLeafDetail}
-                    onToggle={toggleNode}
-                    getNodeColor={getNodeColor}
-                    getNodeIcon={getNodeIcon}
-                  />
-                </div>
-              </React.Fragment>
+            {fishboneData.map((node) => (
+              <div key={node.id} className="flex w-full shrink-0 flex-col items-center py-6">
+                <FishboneBranch
+                  node={node}
+                  depth={0}
+                  onOpenLeafDetail={openLeafDetail}
+                  onToggle={toggleNode}
+                  getNodeColor={getNodeColor}
+                  getNodeIcon={getNodeIcon}
+                />
+              </div>
             ))}
           </div>
         ) : (
