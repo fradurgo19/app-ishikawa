@@ -210,7 +210,7 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
       </p>
       <div className="min-h-0 max-h-[min(calc(100dvh-15rem),1100px)] overflow-x-auto overflow-y-auto overscroll-y-contain pb-10 pt-2 [-webkit-overflow-scrolling:touch]">
         {fishboneData.length > 0 ? (
-          <div className="mx-auto flex min-w-min max-w-5xl flex-col items-center gap-5 px-2 pb-4">
+          <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center gap-5 px-2 pb-4">
             <div
               className="flex shrink-0 flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
               title="Efecto / foco del análisis"
@@ -370,6 +370,38 @@ function FishboneBranch({
     ? 'gap-3 md:gap-x-4 md:gap-y-2 lg:gap-x-5'
     : 'gap-8 md:gap-x-8 md:gap-y-5 lg:gap-x-10';
   const ribStackGap = compactDepth ? 'gap-2.5' : 'gap-8';
+
+  if (node.type === 'actividad' && node.expanded && node.children.length > 0) {
+    return (
+      <div className="flex w-full min-w-0 flex-col items-center gap-4">
+        <div className="flex w-full justify-center px-1">
+          <FishboneNodeButton
+            node={node}
+            hasChildren={hasChildren}
+            Icon={Icon}
+            className={getNodeColor(node.type)}
+            onOpenLeafDetail={onOpenLeafDetail}
+            onToggle={() => hasChildren && onToggle(node.id)}
+          />
+        </div>
+        <div className="flex w-full min-w-0 max-w-2xl flex-col items-center gap-3 border-t border-gray-200 pt-4">
+          {node.children.map((child) => (
+            <div key={child.id} className="flex w-full justify-center px-1">
+              <FishboneBranch
+                node={child}
+                depth={nextDepth}
+                inheritedRib={undefined}
+                onOpenLeafDetail={onOpenLeafDetail}
+                onToggle={onToggle}
+                getNodeColor={getNodeColor}
+                getNodeIcon={getNodeIcon}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
