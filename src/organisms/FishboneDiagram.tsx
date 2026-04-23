@@ -338,9 +338,9 @@ interface FishboneBranchProps {
   getNodeIcon: (type: FishboneNode['type']) => LucideIcon | null;
 }
 
-/** Tramo horizontal hacia la espina central (diagrama vertical). */
+/** Espacio horizontal hacia la columna central (sin trazo, evita líneas que se confunden con divisores). */
 function FishboneRibHorizontalConnector(): React.ReactElement {
-  return <div className="h-px w-4 shrink-0 bg-gray-400 sm:w-6 md:w-8" aria-hidden />;
+  return <div className="w-4 shrink-0 sm:w-6 md:w-8" aria-hidden />;
 }
 
 interface FishboneRibColumnProps {
@@ -433,7 +433,7 @@ function FishboneBranch({
             onToggle={() => hasChildren && onToggle(node.id)}
           />
         </div>
-        <div className="flex w-full min-w-0 max-w-2xl flex-col items-center gap-6 border-t border-gray-200 pt-6">
+        <div className="flex w-full min-w-0 max-w-2xl flex-col items-center gap-6">
           {node.children.map((child) => (
             <div key={child.id} className="flex w-full justify-center px-1">
               <FishboneBranch
