@@ -1,4 +1,4 @@
-import React, { Fragment, useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -55,6 +55,38 @@ function fishboneNodeOpensDetailView(node: FishboneNode): boolean {
 }
 
 /** Intenta abrir recurso/adjunto en nueva pestaña; si hay URL y el navegador no bloquea, no hace falta la pantalla de detalle. */
+function findFishboneNodeById(nodes: FishboneNode[], id: string): FishboneNode | undefined {
+  for (const n of nodes) {
+    if (n.id === id) {
+      return n;
+    }
+    const found = findFishboneNodeById(n.children, id);
+    if (found) {
+      return found;
+    }
+  }
+  return undefined;
+}
+
+function mapToggleFishboneExpanded(nodes: FishboneNode[], nodeId: string): FishboneNode[] {
+  return nodes.map((node) => {
+    if (node.id === nodeId) {
+      return { ...node, expanded: !node.expanded };
+    }
+    return { ...node, children: mapToggleFishboneExpanded(node.children, nodeId) };
+  });
+}
+
+function queryFishboneNodeButton(root: HTMLElement, nodeId: string): HTMLElement | null {
+  const list = root.querySelectorAll<HTMLElement>('[data-fishbone-node]');
+  for (const el of list) {
+    if (el.dataset.fishboneNode === nodeId) {
+      return el;
+    }
+  }
+  return null;
+}
+
 function tryOpenDiagramLeafInNewTab(node: FishboneNode): boolean {
   if (node.type === 'recurso' && isFishboneResourceLeafDetail(node.data)) {
     const text = node.data.resourceText.trim();
@@ -81,8 +113,18 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
 }) => {
   const [fishboneData, setFishboneData] = useState<FishboneNode[]>([]);
   const [loading, setLoading] = useState(true);
+  const diagramScrollRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const location = useLocation();
+
+  const scrollFishboneNodeIntoView = useCallback((nodeId: string) => {
+    const root = diagramScrollRef.current;
+    if (!root) {
+      return;
+    }
+    const target = queryFishboneNodeButton(root, nodeId);
+    target?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+  }, []);
 
   const openLeafDetail = useCallback(
     (node: FishboneNode) => {
@@ -150,18 +192,24 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
     void loadFishboneData();
   }, [loadFishboneData]);
 
-  const toggleNode = (nodeId: string) => {
-    const toggleNodeRecursive = (nodes: FishboneNode[]): FishboneNode[] => {
-      return nodes.map(node => {
-        if (node.id === nodeId) {
-          return { ...node, expanded: !node.expanded };
-        }
-        return { ...node, children: toggleNodeRecursive(node.children) };
+  const toggleNode = useCallback(
+    (nodeId: string) => {
+      let willExpand = false;
+      setFishboneData((previousNodes) => {
+        const current = findFishboneNodeById(previousNodes, nodeId);
+        willExpand = Boolean(current && !current.expanded && current.children.length > 0);
+        return mapToggleFishboneExpanded(previousNodes, nodeId);
       });
-    };
-
-    setFishboneData((previousNodes) => toggleNodeRecursive(previousNodes));
-  };
+      if (willExpand) {
+        queueMicrotask(() => {
+          requestAnimationFrame(() => {
+            scrollFishboneNodeIntoView(nodeId);
+          });
+        });
+      }
+    },
+    [scrollFishboneNodeIntoView]
+  );
 
   const getNodeIcon = (type: FishboneNode['type']) => {
     switch (type) {
@@ -208,33 +256,37 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
         Vista vertical: el efecto va arriba y la espina desciende por marcas y modelos. Las causas se alternan a
         izquierda y derecha en cada nivel (igual que antes arriba/abajo, ahora en los laterales).
       </p>
-      <div className="min-h-0 max-h-[min(calc(100dvh-15rem),1100px)] overflow-x-auto overflow-y-auto overscroll-y-contain pb-10 pt-2 [-webkit-overflow-scrolling:touch]">
+      <div
+        ref={diagramScrollRef}
+        className="min-h-0 max-h-[min(calc(100dvh-15rem),1100px)] overflow-x-auto overflow-y-auto overscroll-x-contain overscroll-y-contain scroll-pl-4 scroll-pr-4 pb-10 pl-3 pr-3 pt-2 sm:scroll-pl-6 sm:scroll-pr-6 sm:pl-5 sm:pr-5 [-webkit-overflow-scrolling:touch]"
+      >
         {fishboneData.length > 0 ? (
-          <div className="mx-auto flex w-full min-w-0 max-w-5xl flex-col items-center gap-3 px-2 pb-4">
-            <div
-              className="flex shrink-0 flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
-              title="Efecto / foco del análisis"
-            >
-              <span className="hidden sm:inline">Efecto</span>
-              <span className="max-w-[min(90vw,320px)] whitespace-pre-wrap break-words sm:max-w-[280px]">
-                {selectedProblem || 'Análisis'}
-              </span>
+          <div className="mx-auto flex w-max min-w-full flex-col items-stretch pb-4">
+            <div className="flex shrink-0 flex-col items-center px-1 pb-4">
+              <div
+                className="flex max-w-[min(100%,320px)] flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
+                title="Efecto / foco del análisis"
+              >
+                <span className="hidden sm:inline">Efecto</span>
+                <span className="max-w-[min(90vw,320px)] whitespace-pre-wrap break-words sm:max-w-[280px]">
+                  {selectedProblem || 'Análisis'}
+                </span>
+              </div>
             </div>
-            <div className="h-4 w-px shrink-0 bg-gray-400" aria-hidden />
             {fishboneData.map((node, index) => (
-              <Fragment key={node.id}>
-                {index > 0 && <div className="h-4 w-px shrink-0 bg-gray-400" aria-hidden />}
-                <div className="flex w-full shrink-0 flex-col items-center py-0.5">
-                  <FishboneBranch
-                    node={node}
-                    depth={0}
-                    onOpenLeafDetail={openLeafDetail}
-                    onToggle={toggleNode}
-                    getNodeColor={getNodeColor}
-                    getNodeIcon={getNodeIcon}
-                  />
-                </div>
-              </Fragment>
+              <div
+                key={node.id}
+                className={`flex w-full shrink-0 flex-col items-center border-t border-gray-300 ${index === 0 ? 'pt-4' : 'pt-5'}`}
+              >
+                <FishboneBranch
+                  node={node}
+                  depth={0}
+                  onOpenLeafDetail={openLeafDetail}
+                  onToggle={toggleNode}
+                  getNodeColor={getNodeColor}
+                  getNodeIcon={getNodeIcon}
+                />
+              </div>
             ))}
           </div>
         ) : (
@@ -333,7 +385,7 @@ function FishboneRibColumn({
   if (placement === 'upper') {
     return (
       <div
-        className={`flex w-full min-w-0 flex-row flex-wrap items-center justify-end sm:flex-nowrap ${ribRowPad} ${ribGap}`}
+        className={`flex w-full min-w-0 max-w-full flex-row flex-wrap items-center justify-start md:justify-end sm:flex-nowrap ${ribRowPad} ${ribGap}`}
       >
         {branch}
         {connector}
@@ -343,7 +395,7 @@ function FishboneRibColumn({
 
   return (
     <div
-      className={`flex w-full min-w-0 flex-row flex-wrap items-center justify-start sm:flex-nowrap ${ribRowPad} ${ribGap}`}
+      className={`flex w-full min-w-0 max-w-full flex-row flex-wrap items-center justify-start sm:flex-nowrap ${ribRowPad} ${ribGap}`}
     >
       {connector}
       {branch}
@@ -405,11 +457,11 @@ function FishboneBranch({
 
   return (
     <div
-      className={`flex w-full min-w-0 flex-col items-stretch md:flex-row md:items-start md:justify-center ${branchLayout}`}
+      className={`flex w-full min-w-0 max-w-full flex-col items-stretch md:flex-row md:items-start md:justify-center ${branchLayout}`}
     >
       {node.expanded && upper.length > 0 && (
         <div
-          className={`order-2 flex w-full min-w-0 flex-col md:order-1 md:max-w-[46%] md:items-end ${ribStackGap}`}
+          className={`order-2 flex w-full min-w-0 max-w-full shrink flex-col md:order-1 md:max-w-[48%] md:items-end ${ribStackGap}`}
         >
           {upper.map((child) => (
             <FishboneRibColumn
@@ -438,7 +490,9 @@ function FishboneBranch({
       </div>
 
       {node.expanded && lower.length > 0 && (
-        <div className={`order-3 flex w-full min-w-0 flex-col md:max-w-[46%] md:items-start ${ribStackGap}`}>
+        <div
+          className={`order-3 flex w-full min-w-0 max-w-full shrink flex-col md:max-w-[48%] md:items-start ${ribStackGap}`}
+        >
           {lower.map((child) => (
             <FishboneRibColumn
               key={child.id}
@@ -488,6 +542,7 @@ function FishboneNodeButton({
   return (
     <button
       type="button"
+      data-fishbone-node={node.id}
       onClick={handleClick}
       aria-expanded={hasChildren ? node.expanded : undefined}
       className={`flex max-w-[240px] items-center gap-2 rounded-lg border-2 px-3 py-2 text-left text-sm transition-all duration-200 ${className} ${
