@@ -869,42 +869,36 @@ function listRecordAttachments(record: MachineRecord) {
 
 function buildDetailNodes(record: MachineRecord): FishboneNode[] {
   const allAttachments = listRecordAttachments(record);
-  const detailNodes: FishboneNode[] = [
-    {
-      id: `resource-${record.id}`,
-      type: 'recurso',
-      label: record.resource,
-      expanded: false,
-      data: {
-        recordId: record.id,
-        resourceText: record.resource,
-        allAttachments,
-      } satisfies FishboneResourceLeafDetail,
-      children: [],
-    },
-    {
-      id: `time-${record.id}`,
-      type: 'tiempo',
-      label: `${record.time} minutos`,
-      expanded: false,
-      children: [],
-    },
-  ];
-
-  for (const att of allAttachments) {
-    detailNodes.push({
-      id: `attachment-${record.id}-${att.id}`,
-      type: 'adjunto',
-      label: att.name,
-      expanded: false,
-      data: {
-        recordId: record.id,
-        attachment: att,
-        allAttachments,
-      } satisfies FishboneAttachmentLeafDetail,
-      children: [],
-    });
-  }
-
-  return detailNodes;
+  const resourceNode: FishboneNode = {
+    id: `resource-${record.id}`,
+    type: 'recurso',
+    label: record.resource,
+    expanded: false,
+    data: {
+      recordId: record.id,
+      resourceText: record.resource,
+      allAttachments,
+    } satisfies FishboneResourceLeafDetail,
+    children: [],
+  };
+  const attachmentNodes: FishboneNode[] = allAttachments.map((att) => ({
+    id: `attachment-${record.id}-${att.id}`,
+    type: 'adjunto',
+    label: att.name,
+    expanded: false,
+    data: {
+      recordId: record.id,
+      attachment: att,
+      allAttachments,
+    } satisfies FishboneAttachmentLeafDetail,
+    children: [],
+  }));
+  const timeNode: FishboneNode = {
+    id: `time-${record.id}`,
+    type: 'tiempo',
+    label: `${record.time} minutos`,
+    expanded: false,
+    children: [],
+  };
+  return [resourceNode, ...attachmentNodes, timeNode];
 }

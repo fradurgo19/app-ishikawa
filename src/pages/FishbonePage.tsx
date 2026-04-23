@@ -80,7 +80,7 @@ export const FishbonePage: React.FC = () => {
               <ul className="space-y-1">
                 <li>• Tipo de equipo → Marca → Modelo → Sección → Problema</li>
                 <li>• Problema → Tipo de Actividad → Actividad</li>
-                <li>• Actividad → Recurso, Tiempo, Adjuntos</li>
+                <li>• Actividad → Recurso, Adjuntos, Tiempo</li>
               </ul>
             </div>
           </div>
