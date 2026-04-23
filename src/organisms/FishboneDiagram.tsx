@@ -261,8 +261,8 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
         className="min-h-0 max-h-[min(calc(100dvh-15rem),1100px)] overflow-x-auto overflow-y-auto overscroll-x-contain overscroll-y-contain scroll-pl-4 scroll-pr-4 pb-10 pl-3 pr-3 pt-2 sm:scroll-pl-6 sm:scroll-pr-6 sm:pl-5 sm:pr-5 [-webkit-overflow-scrolling:touch]"
       >
         {fishboneData.length > 0 ? (
-          <div className="mx-auto flex w-max min-w-full flex-col items-stretch pb-4">
-            <div className="flex shrink-0 flex-col items-center px-1 pb-4">
+          <div className="mx-auto flex w-max min-w-full flex-col items-stretch gap-5 pb-4">
+            <div className="flex shrink-0 flex-col items-center px-1">
               <div
                 className="flex max-w-[min(100%,320px)] flex-col items-center gap-1.5 rounded-lg border-2 border-red-300 bg-red-50 px-3 py-2 text-center text-sm font-semibold text-red-900 sm:flex-row sm:text-left"
                 title="Efecto / foco del análisis"
@@ -273,11 +273,8 @@ export const FishboneDiagram: React.FC<FishboneDiagramProps> = ({
                 </span>
               </div>
             </div>
-            {fishboneData.map((node, index) => (
-              <div
-                key={node.id}
-                className={`flex w-full shrink-0 flex-col items-center border-t border-gray-300 ${index === 0 ? 'pt-4' : 'pt-5'}`}
-              >
+            {fishboneData.map((node) => (
+              <div key={node.id} className="flex w-full shrink-0 flex-col items-center">
                 <FishboneBranch
                   node={node}
                   depth={0}
