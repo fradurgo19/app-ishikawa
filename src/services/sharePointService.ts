@@ -101,6 +101,8 @@ interface SharePointDataService {
     record: MachineRecord,
     attachmentOptions?: UpdateRecordAttachmentOptions
   ) => Promise<MachineRecord>;
+  /** Elimina ítem en SharePoint vía API (permiso verificado en servidor con correo solicitante). */
+  deleteRecord: (recordId: string, requestedByEmail: string) => Promise<void>;
   getKPIs: () => Promise<KPIData>;
   refreshDictionary?: () => Promise<void>;
 }
@@ -933,6 +935,31 @@ class LiveSharePointService implements SharePointDataService {
     await this.getDictionary();
   }
 
+  private async deleteRecordViaApi(recordId: string, requestedByEmail: string): Promise<void> {
+    const params = new URLSearchParams({ resource: 'records', id: String(recordId) });
+    const url = apiUrl(`/api/ishikawa?${params.toString()}`);
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Ishikawa-Delete-Requested-By-Email': requestedByEmail.trim().toLowerCase(),
+      },
+    });
+    if (!response.ok) {
+      const message = await extractHttpError(response);
+      throw new Error(message);
+    }
+  }
+
+  async deleteRecord(recordId: string, requestedByEmail: string): Promise<void> {
+    const id = normalizeListItemId(recordId);
+    if (!id) {
+      throw new Error('El registro debe tener id para eliminar.');
+    }
+    await this.deleteRecordViaApi(id, requestedByEmail);
+    this.invalidateCaches();
+  }
+
   private async getDictionary(): Promise<DictionaryResponse> {
     const graphData = await this.ensureGraphListData();
     if (graphData) {
@@ -968,6 +995,8 @@ const mockServiceAdapter: SharePointDataService = {
     mockSharePointService.createRecord(toMockCreateRecordPayload(record)),
   updateRecord: (record, attachmentOptions) =>
     mockSharePointService.updateRecord(record, attachmentOptions),
+  deleteRecord: (recordId, requestedByEmail) =>
+    mockSharePointService.deleteRecord(recordId, requestedByEmail),
   getKPIs: () => mockSharePointService.getKPIs(),
   refreshDictionary: async () => {},
 };

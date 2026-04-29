@@ -9,6 +9,7 @@ import {
   KPIData,
 } from '../types';
 import { getDistinctModeloIdsFromMatrix } from '../data/equipmentMatrix';
+import { canUserDeleteRecords } from '../config/authConfig';
 
 const LOCALE_SORT = 'es';
 
@@ -266,6 +267,18 @@ class MockSharePointService {
     };
     mockRecords[idx] = updated;
     return updated;
+  }
+
+  async deleteRecord(recordId: string, requestedByEmail: string): Promise<void> {
+    await this.delay(400);
+    if (!canUserDeleteRecords(requestedByEmail)) {
+      throw new Error('Eliminar registros no está permitido para esta cuenta.');
+    }
+    const idx = mockRecords.findIndex((r) => r.id === recordId);
+    if (idx < 0) {
+      throw new Error('No se encontró el registro a eliminar.');
+    }
+    mockRecords.splice(idx, 1);
   }
 
   async getKPIs(): Promise<KPIData> {

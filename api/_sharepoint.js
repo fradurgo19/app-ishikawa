@@ -737,6 +737,55 @@ export async function deleteListItemNativeAttachment(config, itemId, fileName) {
   }
 }
 
+/**
+ * Elimina un ítem de la lista (SharePoint REST DELETE → papelera de reciclaje).
+ */
+export async function deleteListItem(config, itemId) {
+  const accessToken = await getAccessToken(config);
+  const encodedListTitle = escapeODataString(config.listTitle);
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw createHttpError(400, 'Invalid list item id');
+  }
+  const deleteUrl = `${config.siteUrl}/_api/web/lists/GetByTitle('${encodedListTitle}')/items(${id})`;
+
+  let digest;
+  try {
+    digest = await getSharePointFormDigest(config, accessToken);
+  } catch {
+    digest = undefined;
+  }
+
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/json;odata=nometadata',
+    'IF-MATCH': '*',
+  };
+  if (digest) {
+    headers['X-RequestDigest'] = digest;
+  }
+
+  const response = await fetch(deleteUrl, {
+    method: 'DELETE',
+    headers,
+  });
+
+  if (response.status === 404) {
+    throw createHttpError(404, 'List item not found');
+  }
+
+  if (!response.ok) {
+    const responsePayload = await parseJsonResponse(response);
+    throw createHttpError(502, 'SharePoint list item delete failed', {
+      status: response.status,
+      statusText: response.statusText,
+      response: responsePayload,
+      request: { method: 'DELETE', url: deleteUrl },
+      listTitle: config.listTitle,
+    });
+  }
+}
+
 function getItemFieldText(item, internalName) {
   const key = getTextValue(internalName);
   if (!key || !item || typeof item !== 'object') {

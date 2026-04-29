@@ -120,6 +120,7 @@ function mapAccountToUser(account: AccountInfo): User {
   return {
     id: account.localAccountId || account.homeAccountId || normalizedEmail,
     username: normalizedUsername || 'usuario',
+    email: normalizedEmail,
     role: resolveUserRole(normalizedEmail),
     name: normalizeAccountDisplayName(account, normalizedUsername),
   };

@@ -1,6 +1,8 @@
 export interface User {
   id: string;
   username: string;
+  /** Correo normalizado en minúsculas (Azure AD / MSAL). */
+  email: string;
   role: 'basico' | 'coordinador';
   name: string;
 }

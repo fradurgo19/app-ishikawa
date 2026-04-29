@@ -12,8 +12,10 @@ import {
 } from '../data/equipmentMatrix';
 import { resolveActivityDisplayLabel } from '../utils/resolveActivityDisplayLabel';
 import { buildDuplicateCreatePayload } from '../utils/buildDuplicateCreatePayload';
-import { ArrowLeft, Copy, Download, Filter, GitBranch, Pencil } from 'lucide-react';
+import { ArrowLeft, Copy, Download, Filter, GitBranch, Pencil, Trash2 } from 'lucide-react';
 import { EditRecordModal } from '../molecules/EditRecordModal';
+import { useAuth } from '../context/AuthContext';
+import { canUserDeleteRecords } from '../config/authConfig';
 
 interface DataTableFilters {
   tipoEquipoId: string;
@@ -37,6 +39,8 @@ const INITIAL_FILTERS: DataTableFilters = {
 
 export const DataTablePage: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const showDeleteAction = canUserDeleteRecords(user?.email);
   const [records, setRecords] = useState<MachineRecord[]>([]);
   const [filteredRecords, setFilteredRecords] = useState<MachineRecord[]>([]);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -48,6 +52,7 @@ export const DataTablePage: React.FC = () => {
   const [filters, setFilters] = useState<DataTableFilters>(INITIAL_FILTERS);
   const [editingRecord, setEditingRecord] = useState<MachineRecord | null>(null);
   const [duplicatingRecordId, setDuplicatingRecordId] = useState<string | null>(null);
+  const [deletingRecordId, setDeletingRecordId] = useState<string | null>(null);
 
   const tiposFilterOptions = useMemo(
     () => getDistinctTiposEquipo().map((t) => ({ value: t, label: t })),
@@ -168,6 +173,33 @@ export const DataTablePage: React.FC = () => {
       }
     },
     [loadData]
+  );
+
+  const handleDeleteRecord = useCallback(
+    async (record: MachineRecord) => {
+      const email = user?.email?.trim();
+      if (!email || !canUserDeleteRecords(email)) {
+        return;
+      }
+      if (
+        !globalThis.confirm(
+          '¿Eliminar este registro? El ítem irá a la papelera de reciclaje de SharePoint.'
+        )
+      ) {
+        return;
+      }
+      setDeletingRecordId(record.id);
+      try {
+        await sharePointService.deleteRecord(record.id, email);
+        await loadData();
+      } catch (error) {
+        console.error('Error al eliminar registro:', error);
+        alert(error instanceof Error ? error.message : 'No se pudo eliminar el registro.');
+      } finally {
+        setDeletingRecordId(null);
+      }
+    },
+    [loadData, user?.email]
   );
 
   if (loading) {
@@ -366,6 +398,9 @@ export const DataTablePage: React.FC = () => {
                         onEdit={setEditingRecord}
                         onDuplicate={handleDuplicateRecord}
                         duplicateInProgress={duplicatingRecordId === record.id}
+                        showDelete={showDeleteAction}
+                        onDelete={handleDeleteRecord}
+                        deleteInProgress={deletingRecordId === record.id}
                       />
                     </td>
                   </tr>
@@ -476,6 +511,9 @@ interface RecordActionsCellProps {
   onEdit: (record: MachineRecord) => void;
   onDuplicate: (record: MachineRecord) => void;
   duplicateInProgress: boolean;
+  showDelete: boolean;
+  onDelete: (record: MachineRecord) => void;
+  deleteInProgress: boolean;
 }
 
 const RecordActionsCell: React.FC<RecordActionsCellProps> = ({
@@ -483,6 +521,9 @@ const RecordActionsCell: React.FC<RecordActionsCellProps> = ({
   onEdit,
   onDuplicate,
   duplicateInProgress,
+  showDelete,
+  onDelete,
+  deleteInProgress,
 }) => {
   const params = new URLSearchParams();
   if (record.tipoEquipoId.trim()) {
@@ -532,6 +573,18 @@ const RecordActionsCell: React.FC<RecordActionsCellProps> = ({
         <GitBranch className="h-3.5 w-3.5 shrink-0" aria-hidden />
         Diagrama
       </Link>
+      {showDelete ? (
+        <button
+          type="button"
+          disabled={deleteInProgress}
+          aria-busy={deleteInProgress}
+          className="inline-flex items-center gap-1 text-left text-sm font-medium text-red-800 hover:text-red-950 hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => onDelete(record)}
+        >
+          <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {deleteInProgress ? 'Eliminando…' : 'Eliminar'}
+        </button>
+      ) : null}
     </div>
   );
 };

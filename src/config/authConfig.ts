@@ -33,6 +33,18 @@ export const loginRequest = {
 
 export const coordinatorEmails = COORDINATOR_EMAILS;
 
+const DELETE_RECORD_ALLOWED_EMAIL_RAW = normalizeEnvValue(import.meta.env.VITE_DELETE_RECORD_ALLOWED_EMAIL);
+
+/** Solo esta cuenta puede eliminar registros en la tabla (validación duplicada en api/ishikawa DELETE). */
+export const DELETE_RECORD_ALLOWED_EMAIL = (
+  DELETE_RECORD_ALLOWED_EMAIL_RAW || 'jestrada@partequipos.com'
+).toLowerCase();
+
+export function canUserDeleteRecords(email: string | undefined): boolean {
+  const normalized = (email ?? '').trim().toLowerCase();
+  return normalized.length > 0 && normalized === DELETE_RECORD_ALLOWED_EMAIL;
+}
+
 function parseCoordinatorEmails(rawValue: string | undefined): string[] {
   const normalizedValue = normalizeEnvValue(rawValue);
   if (!normalizedValue) {

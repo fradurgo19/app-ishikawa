@@ -11,6 +11,7 @@ import {
   mapListItemToMachineRecord,
   mergeFieldChoiceOptionsFromRecordsAndDictionary,
   mergeListItem,
+  deleteListItem,
   resolveFieldMapWithListSchema,
   sanitizeAttachmentContentBase64,
   stripCustomAttachmentFieldsFromPayload,
@@ -19,6 +20,13 @@ import {
 } from './_sharepoint.js';
 
 const ALLOWED_RESOURCES = Object.freeze(['records', 'dictionary']);
+
+/** Debe coincidir con VITE_DELETE_RECORD_ALLOWED_EMAIL en el cliente (por defecto cuenta autorizada). */
+const DELETE_RECORD_ALLOWED_EMAIL = (
+  process.env.DELETE_RECORD_ALLOWED_EMAIL || 'jestrada@partequipos.com'
+)
+  .trim()
+  .toLowerCase();
 const ALLOWED_RECORD_FILTERS = Object.freeze([
   'tipoEquipoId',
   'brandId',
@@ -136,6 +144,27 @@ function normalizeRemoveAttachmentFileNames(raw) {
     .filter((name) => name.length > 0);
 }
 
+function normalizeDeleteRequesterEmail(headerValue) {
+  if (typeof headerValue !== 'string') {
+    return '';
+  }
+  return headerValue.trim().toLowerCase();
+}
+
+async function writeDeletedRecordResponse(req, res, sharePointConfigResolved) {
+  enforceMethod(req.method, ['DELETE']);
+  const rawId = getQueryValue(req.query.id);
+  if (!rawId || String(rawId).trim() === '') {
+    throw createHttpError(400, 'Query parameter "id" is required');
+  }
+  const requester = normalizeDeleteRequesterEmail(req.headers['x-ishikawa-delete-requested-by-email']);
+  if (!requester || requester !== DELETE_RECORD_ALLOWED_EMAIL) {
+    throw createHttpError(403, 'Eliminar registros no está permitido para esta cuenta.');
+  }
+  await deleteListItem(sharePointConfigResolved, rawId);
+  sendJson(res, 200, { deleted: true, id: String(rawId) });
+}
+
 async function writeUpdatedRecordResponse(req, res, sharePointConfigResolved) {
   enforceMethod(req.method, ['PATCH']);
   const requestBody = parseRequestBody(req.body);
@@ -215,6 +244,11 @@ export default async function handler(req, res) {
 
     if (requestedResource === 'records' && req.method === 'PATCH') {
       await writeUpdatedRecordResponse(req, res, sharePointConfigResolved);
+      return;
+    }
+
+    if (requestedResource === 'records' && req.method === 'DELETE') {
+      await writeDeletedRecordResponse(req, res, sharePointConfigResolved);
       return;
     }
 

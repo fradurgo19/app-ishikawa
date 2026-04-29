@@ -132,7 +132,7 @@ export interface EquipmentMatrixRow {
 
 /** Normaliza etiquetas de la matriz y valores de SharePoint para comparación estable. */
 export function normalizeLabel(value: string): string {
-  return value.trim().replace(/\s+/g, ' ');
+  return value.trim().replaceAll(/\s+/g, ' ');
 }
 
 function parseRows(): EquipmentMatrixRow[] {
