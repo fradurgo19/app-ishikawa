@@ -40,6 +40,10 @@ interface ImportMetaEnv {
   readonly VITE_MSAL_REDIRECT_URI?: string;
   readonly VITE_MSAL_POPUP_REDIRECT_URI?: string;
   readonly VITE_COORDINATOR_EMAILS?: string;
+  /** Lista separada por comas; si falta, se usan jestrada y analista.mantenimiento @partequipos.com. */
+  readonly VITE_DELETE_RECORD_ALLOWED_EMAILS?: string;
+  /** Compatibilidad: mismo uso que VITE_DELETE_RECORD_ALLOWED_EMAILS. */
+  readonly VITE_DELETE_RECORD_ALLOWED_EMAIL?: string;
   readonly VITE_CLIENT_ID?: string;
   readonly VITE_TENANT_ID?: string;
   readonly VITE_REDIRECT_URI?: string;

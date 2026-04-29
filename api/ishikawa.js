@@ -21,12 +21,22 @@ import {
 
 const ALLOWED_RESOURCES = Object.freeze(['records', 'dictionary']);
 
-/** Debe coincidir con VITE_DELETE_RECORD_ALLOWED_EMAIL en el cliente (por defecto cuenta autorizada). */
-const DELETE_RECORD_ALLOWED_EMAIL = (
-  process.env.DELETE_RECORD_ALLOWED_EMAIL || 'jestrada@partequipos.com'
-)
-  .trim()
-  .toLowerCase();
+/** Debe coincidir con VITE_DELETE_RECORD_ALLOWED_EMAILS en el cliente (lista separada por comas). */
+function getDeleteRecordAllowedEmails() {
+  const raw = process.env.DELETE_RECORD_ALLOWED_EMAIL ?? process.env.DELETE_RECORD_ALLOWED_EMAILS;
+  if (typeof raw === 'string' && raw.trim()) {
+    const parsed = raw
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean);
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+  return ['jestrada@partequipos.com', 'analista.mantenimiento@partequipos.com'];
+}
+
+const DELETE_RECORD_ALLOWED_EMAILS = Object.freeze(getDeleteRecordAllowedEmails());
 const ALLOWED_RECORD_FILTERS = Object.freeze([
   'tipoEquipoId',
   'brandId',
@@ -158,7 +168,7 @@ async function writeDeletedRecordResponse(req, res, sharePointConfigResolved) {
     throw createHttpError(400, 'Query parameter "id" is required');
   }
   const requester = normalizeDeleteRequesterEmail(req.headers['x-ishikawa-delete-requested-by-email']);
-  if (!requester || requester !== DELETE_RECORD_ALLOWED_EMAIL) {
+  if (!requester || !DELETE_RECORD_ALLOWED_EMAILS.includes(requester)) {
     throw createHttpError(403, 'Eliminar registros no está permitido para esta cuenta.');
   }
   await deleteListItem(sharePointConfigResolved, rawId);

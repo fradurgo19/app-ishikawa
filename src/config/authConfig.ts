@@ -33,16 +33,37 @@ export const loginRequest = {
 
 export const coordinatorEmails = COORDINATOR_EMAILS;
 
-const DELETE_RECORD_ALLOWED_EMAIL_RAW = normalizeEnvValue(import.meta.env.VITE_DELETE_RECORD_ALLOWED_EMAIL);
+const DEFAULT_DELETE_RECORD_ALLOWED_EMAILS = Object.freeze([
+  'jestrada@partequipos.com',
+  'analista.mantenimiento@partequipos.com',
+]);
 
-/** Solo esta cuenta puede eliminar registros en la tabla (validación duplicada en api/ishikawa DELETE). */
-export const DELETE_RECORD_ALLOWED_EMAIL = (
-  DELETE_RECORD_ALLOWED_EMAIL_RAW || 'jestrada@partequipos.com'
-).toLowerCase();
+const DELETE_RECORD_ALLOWED_EMAILS_RAW = normalizeEnvValue(
+  import.meta.env.VITE_DELETE_RECORD_ALLOWED_EMAILS ?? import.meta.env.VITE_DELETE_RECORD_ALLOWED_EMAIL
+);
+
+function parseCommaSeparatedLowerEmails(rawValue: string): string[] {
+  return rawValue
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/**
+ * Cuentas que pueden eliminar registros en la tabla (validación duplicada en api/ishikawa DELETE).
+ * Sobrescribible con `VITE_DELETE_RECORD_ALLOWED_EMAILS` (lista separada por comas).
+ */
+export const deleteRecordAllowedEmails: readonly string[] = (() => {
+  if (!DELETE_RECORD_ALLOWED_EMAILS_RAW) {
+    return [...DEFAULT_DELETE_RECORD_ALLOWED_EMAILS];
+  }
+  const parsed = parseCommaSeparatedLowerEmails(DELETE_RECORD_ALLOWED_EMAILS_RAW);
+  return parsed.length > 0 ? parsed : [...DEFAULT_DELETE_RECORD_ALLOWED_EMAILS];
+})();
 
 export function canUserDeleteRecords(email: string | undefined): boolean {
   const normalized = (email ?? '').trim().toLowerCase();
-  return normalized.length > 0 && normalized === DELETE_RECORD_ALLOWED_EMAIL;
+  return normalized.length > 0 && deleteRecordAllowedEmails.includes(normalized);
 }
 
 function parseCoordinatorEmails(rawValue: string | undefined): string[] {
