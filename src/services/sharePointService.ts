@@ -8,12 +8,13 @@ import {
   Model,
   Section,
 } from '../types';
-import { isMicrosoftAuthEnabled } from '../config/authConfig';
+import { canUserDeleteRecords, isMicrosoftAuthEnabled } from '../config/authConfig';
 import { getClientFieldMap } from '../config/clientSharePointFieldMap';
 import { filterMachineRecords } from '../utils/filterMachineRecords';
 import { authService } from './authService';
 import {
   createSharePointListItemViaMicrosoftGraph,
+  deleteSharePointListItemViaMicrosoftGraph,
   fetchSharePointListViaMicrosoftGraph,
   loadGraphListItemAsMachineRecord,
   updateSharePointListItemViaMicrosoftGraph,
@@ -247,6 +248,12 @@ function delegatedGraphUpdateErrorMessage(graphError: unknown): string {
   const detail =
     graphError instanceof Error ? graphError.message : 'Error desconocido al actualizar en Graph';
   return `No se pudo actualizar el registro con Microsoft Graph (permisos delegados). ${detail}`;
+}
+
+function delegatedGraphDeleteErrorMessage(graphError: unknown): string {
+  const detail =
+    graphError instanceof Error ? graphError.message : 'Error desconocido al eliminar en Graph';
+  return `No se pudo eliminar el registro con Microsoft Graph (permisos delegados). ${detail}`;
 }
 
 function machineRecordToGraphCreateInput(record: MachineRecord): GraphCreateRecordInput {
@@ -952,10 +959,44 @@ class LiveSharePointService implements SharePointDataService {
   }
 
   async deleteRecord(recordId: string, requestedByEmail: string): Promise<void> {
+    if (!canUserDeleteRecords(requestedByEmail)) {
+      throw new Error('Eliminar registros no está permitido para esta cuenta.');
+    }
     const id = normalizeListItemId(recordId);
     if (!id) {
       throw new Error('El registro debe tener id para eliminar.');
     }
+
+    const ctx = await resolveGraphListContext();
+    await authService.initializeAuth();
+    await authService.getAccountWithRetry();
+
+    let graphToken: string | null = null;
+    try {
+      graphToken = await authService.acquireGraphAccessToken();
+    } catch {
+      graphToken = null;
+    }
+
+    if (ctx && graphToken) {
+      try {
+        await deleteSharePointListItemViaMicrosoftGraph({
+          siteUrl: ctx.siteUrl,
+          listName: ctx.listName,
+          accessToken: graphToken,
+          itemId: id,
+        });
+        this.invalidateCaches();
+        return;
+      } catch (graphErr) {
+        if (isDelegatedOnlySharePointMode()) {
+          throw new Error(delegatedGraphDeleteErrorMessage(graphErr));
+        }
+      }
+    } else if (isDelegatedOnlySharePointMode()) {
+      throw new Error(MSG_DELEGATED_SIGNIN_REQUIRED);
+    }
+
     await this.deleteRecordViaApi(id, requestedByEmail);
     this.invalidateCaches();
   }

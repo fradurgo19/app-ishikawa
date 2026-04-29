@@ -93,6 +93,21 @@ async function graphRequestPatch(
   }
 }
 
+/** DELETE de ítem de lista (respuesta 204 sin cuerpo). */
+async function graphRequestDelete(url: string, accessToken: string): Promise<void> {
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(graphHttpErrorMessage(response.status, text));
+  }
+}
+
 /** Misma forma que el payload del API (sin id ni fechas de servidor). */
 export type GraphCreateRecordInput = Omit<MachineRecord, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -416,6 +431,24 @@ export async function updateSharePointListItemViaMicrosoftGraph(options: {
     itemId,
     sharePointAccessToken: null,
   });
+}
+
+/**
+ * Elimina un ítem de lista con Microsoft Graph (mismo patrón que update: token delegado en el navegador).
+ * @see https://learn.microsoft.com/graph/api/listitem-delete
+ */
+export async function deleteSharePointListItemViaMicrosoftGraph(options: {
+  siteUrl: string;
+  listName: string;
+  accessToken: string;
+  itemId: string;
+}): Promise<void> {
+  const { siteUrl, listName, accessToken, itemId } = options;
+  const siteId = await resolveGraphSiteId(siteUrl, accessToken);
+  const listId = await resolveGraphListId(siteId, listName, accessToken);
+  const encodedId = encodeURIComponent(itemId);
+  const deleteUrl = `${GRAPH_ROOT}/sites/${siteId}/lists/${listId}/items/${encodedId}`;
+  await graphRequestDelete(deleteUrl, accessToken);
 }
 
 /** Recarga un ítem (p. ej. tras subir adjuntos por SharePoint REST) para devolver attachments vía Graph. */
