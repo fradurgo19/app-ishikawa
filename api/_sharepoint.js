@@ -459,6 +459,42 @@ async function patchListItemFieldsViaMicrosoftGraph(config, itemId, fieldsPayloa
 }
 
 /**
+ * Elimina el ítem de lista vía Microsoft Graph (DELETE .../items/{id}).
+ * Muchos tenants aceptan Graph con app-only cuando SharePoint REST DELETE devuelve 401/403 o fallos equivalentes.
+ */
+async function deleteListItemViaMicrosoftGraph(config, itemId) {
+  const graphToken = await getMicrosoftGraphAccessToken(config);
+  const { siteGraphId, listGraphId } = await resolveGraphSiteAndListIdsCached(config, graphToken);
+  const itemIdStr = getTextValue(itemId);
+  if (!itemIdStr) {
+    throw createHttpError(400, 'Invalid list item id for Microsoft Graph delete');
+  }
+  const url = `${MICROSOFT_GRAPH_ROOT}/sites/${siteGraphId}/lists/${listGraphId}/items/${encodeURIComponent(itemIdStr)}`;
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers: {
+      Authorization: `Bearer ${graphToken}`,
+    },
+  });
+
+  if (response.status === 204 || response.status === 200) {
+    return;
+  }
+
+  if (response.status === 404) {
+    throw createHttpError(404, 'List item not found');
+  }
+
+  const data = await parseJsonResponse(response);
+  throw createHttpError(502, 'Microsoft Graph list item delete failed', {
+    status: response.status,
+    statusText: response.statusText,
+    response: data,
+    url,
+  });
+}
+
+/**
  * InternalName OData del tipo de fila de la lista (p. ej. SP.Data.IshikawaListItem).
  * Sin esto, algunos inquilinos devuelven 401 en MERGE aunque el POST de alta funcione.
  */
@@ -738,9 +774,9 @@ export async function deleteListItemNativeAttachment(config, itemId, fileName) {
 }
 
 /**
- * Elimina un ítem de la lista (SharePoint REST DELETE → papelera de reciclaje).
+ * Respaldo: eliminar ítem vía SharePoint REST DELETE (papelera de reciclaje).
  */
-export async function deleteListItem(config, itemId) {
+async function deleteListItemViaSharePointRest(config, itemId) {
   const accessToken = await getAccessToken(config);
   const encodedListTitle = escapeODataString(config.listTitle);
   const id = Number(itemId);
@@ -783,6 +819,40 @@ export async function deleteListItem(config, itemId) {
       request: { method: 'DELETE', url: deleteUrl },
       listTitle: config.listTitle,
     });
+  }
+}
+
+/**
+ * Elimina un ítem: primero Microsoft Graph, luego REST (misma estrategia que mergeListItem).
+ */
+export async function deleteListItem(config, itemId) {
+  const id = Number(itemId);
+  if (!Number.isInteger(id) || id < 1) {
+    throw createHttpError(400, 'Invalid list item id');
+  }
+
+  let graphError = null;
+  try {
+    await deleteListItemViaMicrosoftGraph(config, itemId);
+    return;
+  } catch (err) {
+    if (err?.statusCode === 404) {
+      throw err;
+    }
+    graphError = err;
+  }
+
+  try {
+    await deleteListItemViaSharePointRest(config, itemId);
+  } catch (restError) {
+    throw createHttpError(
+      502,
+      'Could not delete list item. Microsoft Graph failed first; SharePoint REST DELETE also failed.',
+      {
+        graphAttempt: graphError?.details ?? { message: graphError?.message ?? String(graphError) },
+        sharePointRestAttempt: restError?.details ?? { message: restError?.message ?? String(restError) },
+      }
+    );
   }
 }
 
