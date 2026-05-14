@@ -36,6 +36,11 @@ export const coordinatorEmails = COORDINATOR_EMAILS;
 const DEFAULT_DELETE_RECORD_ALLOWED_EMAILS = Object.freeze([
   'jestrada@partequipos.com',
   'analista.mantenimiento@partequipos.com',
+  'soporte.servicio01@partequipos.com',
+  'centrodemonitoreo@partequipos.com',
+  'soportemq@partequipos.com',
+  'soporte.servicio02@partequipos.com',
+  'soporte.servicio3@partequipos.com',
 ]);
 
 const DELETE_RECORD_ALLOWED_EMAILS_RAW = normalizeEnvValue(
